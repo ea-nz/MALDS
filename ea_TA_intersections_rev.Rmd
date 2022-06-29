@@ -1,0 +1,3361 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+
+# 28/6/22
+# this function was previously named LP0012_intersection_functions
+# it was previously called from LP0012_rohe_intersections_rev.Rmd
+# It has been renamed and adapted for EANZ on 28/6/22
+
+
+
+
+This script tries to find all crown land and remove it from the analysis.
+There is no definitive data layer for Crown Land.
+The Closest is the layer in the Central Record of State Land - a prototype data layer created by LINZ
+It is available at https://linz.maps.arcgis.com/apps/webappviewer/index.html?id=b83e61d26f5a4954934febcf812d6a09
+
+I see 5 different methods to extract Crown Land
+
+1. Use the CL layer from Linz (which is only LINZ-managed Crown Land)
+2. Use the Protected Areas Layer which is the DOC-managed Crown Land)
+3. Use the PLP-layer finding where there is no entry for the "titles" field
+4. Use the PO layer searching for Crown-Like names in the Owner Field
+5. Use AB, looking for Crown-like names in the Owner surname file (not implemented)
+
+
+
+# set up 
+
+```{r}
+
+library(tidyverse)
+library(sf)
+library(beepr)
+
+rootDrive = "D:/"
+
+source("E:/OneDrive - Environmental Analytics/ea/EANZ-Code/code/R workdir/ea/ea_utils.R")
+source("E:\OneDrive - Environmental Analytics\ea\MALDS\code\R\MALDS/ea_intersection_functions.R")
+
+# source(paste0(rootDrive,"LUCA Team/Land Use Capability Assessments Limited/LUCA team site - Documents/LUCA-A/Projects/2021-04-11-LP0012-BERL-GHGMaoriLand/code/R/LP0012_R_Project_Nov2021/LP0012_intersection_functions.R"))
+
+datadir = "E:/OneDrive - Environmental Analytics/ea/MALDS/data/"
+plotdir = "E:/OneDrive - Environmental Analytics/ea/MALDS/plots/"
+
+
+TA_parent_folder = paste0(datadir,"TA_level_data/")
+
+
+
+```
+
+# create ML_gt_1ha
+
+```{r}
+
+recreate_ML_gt_1ha = F
+
+if (recreate_ML_gt_1ha){
+  
+  ML = luca_load("ML")
+  
+  ML_gt_1ha = ML %>% 
+    mutate(ML_UID = seq(1, nrow(ML)),
+           ML_AREA = as.numeric(st_area(.)/1e4)) %>% 
+    filter(ML_AREA >1.)
+  
+  ML_gt_1ha_ffn = paste0(datadir, "ML_gt_1ha.gpkg")
+  st_write(ML_gt_1ha, ML_gt_1ha_ffn, append = F)
+  
+  ML_gt_1ha_ng = ML_gt_1ha %>% 
+    st_set_geometry(NULL) %>% 
+    as_tibble()
+  
+  ML_gt_1ha_ng_ffn = paste0(datadir, "ML_gt_1ha_ng.gpkg")
+  st_write(ML_gt_1ha_ng, ML_gt_1ha_ng_ffn, append = F)
+}
+
+```
+
+# create LUM_LP0012
+
+
+```{r}
+
+
+
+#~~~~~~~   Set Current TA   ~~~~~~~~~~~~#
+
+
+
+TA_parent_folder = paste0(datadir,"TA_level_data/")
+TA = ea_load("TA")
+TA_names = TA %>% pull(TA2019_V_1 ) %>% unique()
+
+
+nTA = length(TA_names)
+
+
+```
+
+# Step 4. Use the CrOSL_Entry List of Crown Land Owners to get the Additional Crown Land from the P&O Dataset
+
+```{r}
+
+recreate_PO_CL = F
+
+if (recreate_PO_CL){
+  
+  # Intersect ea with the PLP Layer
+  N
+  
+  PO = luca_load("PO") %>% 
+    mutate(
+      PO_UID = seq(1,nrow(.)),
+      PO_AREA = as.numeric(st_area(.))/1e4) 
+  
+  
+  PO_ng = PO %>% 
+    st_set_geometry(NULL) %>% 
+    as_tibble()
+  
+  PLP_id = PLP %>% pull(id)
+  PO_id = PO %>% pull(id)
+  
+  PLP_idxPO_id = intersect(PLP_id, PO_id)
+  
+  length(PLP_idxPO_id)     
+  
+  PLP_id_IN_PO_id = length(which(PLP_id %in% PO_id))
+  PO_id_IN_PLP_id = length(which(PO_id %in% PLP_id))
+  
+  length(PO_id)
+  length(PLP_id)
+  
+  
+  Owners = PO_ng %>% pull(owners )
+  
+  Crown_Entities = read_csv(paste0(datadir_orig, "crown_land_entities.csv")) %>% pull(CrOSL_Entity)
+  
+  ix = which(Owners %in% Crown_Entities)
+  
+  Owners_CL = Owners[ix]
+  
+  PO_CL = PO[ix,] %>% dplyr::select(-fid)
+  
+  PO_CL_ffn = paste0(datadir, "PO_CL.gpkg")
+  st_write(PO_CL, PO_CL_ffn, append=F)
+  
+}
+
+```
+
+# Step 5. Identify the owners in Agribase with Crown Ownership (lets ignore this for now)
+
+```{r}
+
+find_CL_in_AB = F
+
+if (find_CL_in_AB){
+  
+  AB = luca_load("AB")
+  
+  owners = AB %>% pull(owner_surn) %>% unique()
+  
+  
+  owners[which(str_detect(owners,"jesty"))]
+  owners[which(str_detect(owners,"jesty"))]
+  
+  
+  
+  fruit <- c("apple", "banana", "pear", "pinapple")
+  which(str_detect(fruit, "a"))
+  
+}
+
+
+```
+
+
+
+
+
+
+
+
+Tasks are:
+
+Task 1. intersect TA with the CL Layer (TAxCL)
+Task 2. intersect TA with the PA Layer (TAxPA)
+Task 3. intersect TA with the properties with no title in the PLP Layer (TAxPLP_CL)
+Task 4. intersect TA with the properties with no title in the PLP Layer (TAxPO_CL)
+Task 5. Subtract the TAxCL from the TA to create TA_MINUS_CL_01 (TA_MINUS_CL_01.gpkg)
+Task 6. Subtract the TAxPA from the TA_MINUS_CL_01 to create TA_MINUS_CL_02(TA_MINUS_CL_02.gpkg)
+Task 7. Subtract the TAxPLP_CL from the TA_MINUS_CL_02 to create TA_MINUS_CL_03(TA_MINUS_CL_03.gpkg)
+Task 8. Subtract the TAxPO_CL from the TA_MINUS_CL_03 to create TA_MINUS_CL_04(TA_MINUS_CL_04gpkg)
+
+
+Task 9.  TA_NCLxPLP   (TA_NCLxPLP_gt_1ha)
+Task 10. TA_NCLxML_gt_1ha (TA_NCLxML_gt_1ha) 
+Task 11. TA_NCLxLUM  (TA_NCLxLUM) 
+Task 12. TA_NCLxAB_gt_1ha  (TA_NCLxAB_LP0012_gt_1ha)
+Task 13. Subtract the ML from the NML (TA_NCLxML) 
+Task 14. TA_NCLxLUMxML_gt_1ha  (NCLxMLxLUM) 
+Task 15. TA_NCLxPLP_gt_1haxGT  (TA_NCLxPLP_gt_1haxGT)
+Task 16. TA_NCLxPLP_gt_1haxML (TA_NCLxPLP_gt_1haxML)
+Task 17. NCLxPLPxMLxLUM (HE_NLCxPLPxMLxLUM)
+Task 18. NCLxPLPxGTxLUM (TA_NLCxPLPxGTxLUM)
+Task 19. TAxLUM (TAxLUM)
+
+
+# INTERSECTION TASK CONTROL: Settings for running main loop (which TA and which tasks)
+
+
+
+```{r}
+
+
+# TA_ix_to_proc = 1:11
+TA_ix_to_proc = 81
+TA_ix_to_proc = c(1:length(TA_names))
+# TA_ix_to_proc = 32
+# TA_ix_to_proc=20
+TA_ix_to_proc = c(1:11)
+
+TA_ix_to_proc = 1:67 # tasklist = c(1,2,3,4)
+TA_ix_to_proc = c(1:57,59:67) # tasklist = c(1,2,3,4)
+
+
+tasklist = c(5,6,7,8)
+tasklist = c(10,11,12,13)
+tasklist = 31
+
+# if (1 %in% tasklist){
+#   if (!exists("PLP_gt_1ha")){
+#     PLP_gt_1ha = luca_load("PLP_gt_1ha")
+#   }
+#   intersection_tasks(tasklist, TA_ix_to_proc, PLP_gt_1ha=PLP_gt_1ha)
+# }
+
+if (28 %in% tasklist){
+
+PLP = ea_load("PLP")
+PLP_points = PLP %>% st_point_on_surface()
+ 
+}
+
+
+if (29 %in% tasklist){
+# LUCxTA_nat = st_read(paste0(datadir,"LUCxTA.gpkg"))
+  LUC = ea_load("LUC")
+}
+
+
+if (31 %in% tasklist){
+# LUCxTA_nat = st_read(paste0(datadir,"LUCxTA.gpkg"))
+  LUM = ea_load("LUM")
+}
+
+intersection_tasks(tasklist, TA_ix_to_proc)
+
+```
+
+
+
+#  Inventory set up
+
+```{r}
+if (!SWAP_TA_FOR_IWI){
+  
+  TA_parent_folder = paste0(datadir,"TA_level_data_sets/")
+  TA = luca_load("TA")
+  TA_names = TA %>% pull(TA) %>% unique()
+  
+}else{
+  TA_parent_folder = paste0(datadir,"iwi_level_data_sets/")
+  
+  BERL_TA = luca_load("TA")
+  CRS = crs(BERL_TA)
+  
+  IWI_rs = c(
+    " / " = "---",
+    " " = "_"
+  )
+  
+  
+  
+  TA = luca_load("IWI") %>% 
+    st_transform(crs = CRS) %>% 
+    mutate(
+      IWI_NAMES = str_replace_all(Name,IWI_rs))
+  
+  TA_names = TA %>% pull(IWI_NAMES) %>% unique()
+  
+}
+```
+
+
+#  Inventory control
+
+
+```{r}
+# TA = luca_load("TA")
+
+file_pattern_ix = 7
+
+#~~~~~~~   Set Current TA   ~~~~~~~~~~~~#
+
+nTA = length(TA_names)
+TA_ix_to_proc = 1:nTA
+
+# file_pattern_to_search = "TA_NCLxPLP_gt_1ha.gpkg"         #task 9
+# file_pattern_to_search = "TA_NCLxML_gt_1ha.gpkg"          #task 10
+# file_pattern_to_search = "TA_NCLxLUM.gpkg"                #task 11
+# file_pattern_to_search = "TA_NCLxAB_LP0012_gt_1ha.gpkg"   #task 12
+# file_pattern_to_search = "TA_NCLxML.gpkg"                  #task 13a
+# file_pattern_to_search = "TA_NCLxGT.gpkg"                 #task 13b
+# file_pattern_to_search = "NCLxMLxLUM.shp"                   #task 14
+# file_pattern_to_search = "TA_NCLxPLP_gt_1haxGT.shp"       #task 15
+# file_pattern_to_search = "TA_NCLxPLP_gt_1haxML.shp"       #task 16
+# file_pattern_to_search = "TA_NLCxPLPxMLxLUM.shp"          #task 17
+# file_pattern_to_search = "TA_NLCxPLPxGTxLUM.shp"          #task 18
+
+
+layer_list = c("TAxCL.gpkg","TAxPA.gpkg","TAxPLP_CL.gpkg","TAxPO_CL.gpkg",
+               "TA_MINUS_CL_01.gpkg","TA_MINUS_CL_02.gpkg","TA_MINUS_CL_03.gpkg","TA_MINUS_CL_04.gpkg",
+               "TA_NCLxPLP_gt_1ha.gpkg","TA_NCLxML_gt_1ha.gpkg" ,"TA_NCLxLUM.gpkg" ,"TA_NCLxAB_LP0012_gt_1ha.gpkg" ,"TA_NCLxML.gpkg" ,"TA_NCLxGT.gpkg"   , "NCLxMLxLUM.shp"   , "TA_NCLxPLP_gt_1haxGT.shp"   ,"TA_NCLxPLP_gt_1haxML.shp" , "TA_NLCxPLPxMLxLUM.shp" , "TA_NLCxPLPxGTxLUM.shp" )   
+
+
+# select file pattern to search index here (same as task #)
+
+file_pattern_to_search = layer_list[file_pattern_ix]
+
+TA_data_not_found = ""
+missing_TA = ""
+n_found = 0
+n_not_found = 0
+
+for (iTA in 1:length(TA_ix_to_proc)){
+  
+  
+  
+  # iTA = 1  
+  
+  curr_TA_ix = TA_ix_to_proc[iTA]
+  
+  
+  TA_name_curr = TA_names[curr_TA_ix]
+  
+  
+  
+  #get the sf (polygon) for the current TA
+  # TA_curr = TA %>% dplyr::filter(TA==TA_name_curr) %>% summarise()
+  
+  # mapview(TA_curr)
+  
+  TA_folder_curr = paste0(TA_parent_folder, TA_name_curr,'/')
+  TA_plotdir = paste0(plotdir, TA_name_curr,"/")
+  
+  # if (!dir.exists(TA_folder_curr)){dir.create(TA_folder_curr, recursive = T)}
+  # if (!dir.exists(TA_plotdir)){dir.create(TA_plotdir, recursive = T)}
+  
+  
+  ffn_to_search = paste0(TA_folder_curr, file_pattern_to_search)
+  
+  print("****************")
+  print(paste("looking for", ffn_to_search))
+  print("****************")
+  
+  
+  if (file.exists(ffn_to_search)){
+    print(paste("Found", ffn_to_search))
+    n_found = n_found + 1
+    
+  }else{
+    print(paste("Did not find", ffn_to_search))
+    TA_data_not_found = c(TA_data_not_found, TA_name_curr)
+    n_not_found = n_not_found + 1
+  }
+  
+  
+  
+  
+  
+  
+}
+
+
+# print(paste("
+
+if (n_not_found==0){
+  print(paste("Found all intersections for", file_pattern_to_search))
+}else{
+  print(paste("Number missing = ", n_not_found))
+  missing_TA = c(missing_TA, TA_name_curr)
+  print(missing_TA)
+}
+
+
+```
+
+# aggregate TA function wrapper
+
+```{r}
+
+
+layer_list = c("TAxCL.gpkg",                                     # layer 1
+               "TAxPA.gpkg",                                     # layer 2
+               "TAxPLP_CL.gpkg",                                 # layer 3
+               "TAxPO_CL.gpkg",                                  # layer 4
+               "TA_MINUS_CL_01.gpkg",                            # layer 5
+               "TA_MINUS_CL_02.gpkg",                            # layer 6
+               "TA_MINUS_CL_03.gpkg",                            # layer 7
+               "TA_MINUS_CL_04.gpkg",                            # layer 8
+               "TA_NCLxPLP_gt_1ha.gpkg",                    # layer 9
+               "TA_NCLxML_gt_1ha.gpkg" ,                    # layer 10
+               "TA_NCLxLUM.gpkg" ,                          # layer 11
+               "TA_NCLxAB_LP0012_gt_1ha.gpkg" ,             # layer 12
+               "TA_NCLxGT.gpkg"   ,                         # layer 13
+               "NCLxMLxLUM.shp"   ,                           # layer 14
+               "TA_NCLxPLP_gt_1haxGT.gpkg"   ,               # layer 15
+               "TA_NCLxPLP_gt_1haxML.shp" ,                 # layer 16
+               "TA_NCLxPLPxMLxLUM.shp" ,                    # layer 17
+               "TA_NCLxPLPxGTxLUM.shp" ,                     # layer 18
+               "TAxLUM.gpkg",                                # layer 19
+               "TA_NCLxML.gpkg"  ,                           # layer 20
+               "TAxABxGT.gpkg"    ,                          # layer 21
+               "TAxABxML.gpkg",                              # layer 22
+               "TA_NCLxPLP_gt_1haxFC.gpkg",                   # layer 23
+               "TAxPLPxFCxLUM.shp"   ,                        # layer 24
+               "placeholder",# layer 25
+               "placeholder",# layer 26
+               "TAxPLPxAB.gpkg"                   # layer 27
+)   
+
+
+for (ilayer in 1){
+  
+  
+  ilayer = 9
+  
+  clayer = layer_list[ilayer]
+  
+  
+  # remove_overlaps_ch=T
+  # DD = agg_TA(clayer, datadir, my_remove_overlaps = remove_overlaps_ch)
+  create_spatial_agg_choice = F
+  
+  DD = agg_TA(clayer, datadir_rev, create_sp_ag = create_spatial_agg_choice)
+  
+}
+
+
+DD %>% pull(TA) %>% unique()
+
+DD %>% filter(TA=="Kurahaupo")
+
+```
+
+
+
+# aggregate TA function
+
+
+```{r}
+
+
+agg_TA = function(layer_fn, datadir, my_remove_overlaps = F, create_sp_ag = F){
+  
+  # layer_fn ="TA_NCLxML.gpkg"
+  # my_remove_overlaps=T
+  
+  TA_parent_folder = paste0(datadir,"TA_level_data_sets/")
+  TA = luca_load("TA")
+  TA_names = TA %>% pull(TA) %>% unique()
+  TA_ix_to_proc =1:length(TA_names)
+  
+  
+  for (iTA in TA_ix_to_proc){
+    # iTA=1
+    
+    curr_TA_ix = TA_ix_to_proc[iTA]
+    TA_name_curr = TA_names[curr_TA_ix]
+    TA_folder_curr = paste0(TA_parent_folder, TA_name_curr,'/')
+    TA_plotdir = paste0(plotdir, TA_name_curr,"/")
+    
+    layer_ffn = paste0(TA_folder_curr, layer_fn)
+    
+    if (file.exists(layer_ffn)){
+      layer_data = st_read(layer_ffn)
+      
+      if (my_remove_overlaps){
+        
+        
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        print(paste('Removing Overlaps....TA ',iTA))
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        
+        tic()
+        
+        layer_data = layer_data  %>%  mutate(temp_UID = 1:nrow(.))
+        layer_data_buff = st_buffer(layer_data,-30)
+        layer_data_ix = st_intersection(layer_data_buff, tolerance = 20)
+        
+        layer_no_overlaps_ix = layer_data_ix %>% filter(n.overlaps<2) %>% pull(temp_UID)
+        layer_no_overlaps = layer_data %>% filter(temp_UID %in% layer_no_overlaps_ix)
+        layer_data = layer_no_overlaps %>% dplyr::select(-temp_UID)
+        
+        toc()
+        
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        print(paste('Completed removeing......'))
+        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+        
+      }
+      
+      
+      Layer_data_ng = layer_data %>% 
+        mutate(POLY_AREA = as.numeric(st_area(.))/1e4) %>% 
+        st_set_geometry(NULL) %>% 
+        as_tibble() %>% 
+        mutate(TA = TA_name_curr)
+      
+      if (iTA==1){
+        DD = Layer_data_ng
+      }else{
+        DD = DD %>% bind_rows(Layer_data_ng)
+      }
+      
+      if (create_sp_ag){
+        if (iTA==1){
+          nat_layer = layer_data
+        }else{
+          nat_layer = nat_layer %>% bind_rows(layer_data)
+        }
+      }
+      
+    }else{
+      
+      print("---------    ??????????????????    ----------------")
+      print(past("Missing Layer: ", layer_fn,"for", TA_name_curr))
+      print("---------    ??????????????????    ----------------")
+      
+      
+    }
+    
+    
+  }
+  
+  
+  layer_name_stub = tools::file_path_sans_ext(layer_fn)
+  layer_name_fout = paste0(layer_name_stub, ".RDS")
+  layer_name_ffout = paste0(datadir,"nat_agg_data_sets/", layer_name_fout)
+  
+  saveRDS(DD, layer_name_ffout)
+  print(paste("Saved layer DD which contains the aggregate of", layer_fn,"for each TA to the file", layer_name_ffout))
+  
+  
+  if (create_sp_ag){
+    
+    sp_layer_name_stub = tools::file_path_sans_ext(layer_fn)
+    sp_layer_name_fout = paste0(sp_layer_name_stub, ".gpkg")
+    sp_layer_name_ffout = paste0(datadir,"nat_agg_data_sets/", sp_layer_name_fout)
+    
+    st_write(nat_layer, sp_layer_name_ffout, append=F)
+    print(paste("...also saved a spatial layer which contains the aggregate of", layer_fn,"for each TA to the file", sp_layer_name_ffout))
+  }
+  
+  
+  
+  
+  return(DD)
+}
+
+
+```
+
+
+# rename files
+
+
+```{r}
+
+
+fname_orig = "TA_NLCxPLPxGTxLUM.prj"
+fname_new = "TA_NCLxPLPxGTxLUM.prj"
+
+TA_parent_folder = paste0(datadir,"TA_level_data_sets/")
+TA = luca_load("TA")
+TA_names = TA %>% pull(TA) %>% unique()
+TA_ix_to_proc =1:length(TA_names)
+
+for (iTA in TA_ix_to_proc){
+  # iTA=1
+  
+  
+  
+  curr_TA_ix = TA_ix_to_proc[iTA]
+  TA_name_curr = TA_names[curr_TA_ix]
+  TA_folder_curr = paste0(TA_parent_folder, TA_name_curr,'/')
+  TA_plotdir = paste0(plotdir, TA_name_curr,"/")
+  
+  layer_ffn_orig = paste0(TA_folder_curr, fname_orig)
+  layer_ffn_new = paste0(TA_folder_curr, fname_new)
+  
+  if (file.exists(layer_ffn_orig)) {
+    file.rename(layer_ffn_orig, layer_ffn_new)
+    print(paste("Renaming file", layer_ffn_orig,"to", layer_ffn_new))
+  } else {
+    print(paste("File", layer_ffn_orig,"not found"))
+    
+  }
+  
+  
+}
+
+
+
+
+```
+
+
+# Analyse layers and make tables
+
+## Table 0 (or layer #20). TA
+
+```{r}
+
+layer_name = "TA"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+
+
+# tidy the data 
+agg_data_tidy = agg_data 
+
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables-17-05-2022.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+## Table 1 TAxCL
+
+```{r}
+
+layer_name = "TAxCL"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 13391
+
+#find number unique ids
+agg_data %>% pull(CL_UID   ) %>% unique() %>% length()   # 12226
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(CL_UID) %>% 
+  slice(which.max(CL_AREA)) %>% 
+  dplyr::select(CL_UID, TA)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "CL_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(CL_UID) %>% 
+  summarise(across(napalis_id:CL_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+
+# aggregate to TA level
+
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    nprop = length(id),
+    CL_AREA_tot  = sum(CL_AREA ),
+    POLY_AREA_tot = sum(POLY_AREA ))
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+
+
+## Table 2 TAxPA
+
+```{r}
+
+layer_name = "TAxPA"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 24882
+
+#find number unique ids
+agg_data %>% pull(PA_UID   ) %>% unique() %>% length()   # 17555
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(PA_UID) %>% 
+  slice(which.max(PA_AREA)) %>% 
+  dplyr::select(PA_UID, TA)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "PA_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(PA_UID) %>% 
+  summarise(across(napalis_id:PA_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+
+# aggregate to TA level
+
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    nprop = length(id),
+    PA_AREA_tot  = sum(PA_AREA ),
+    POLY_AREA_tot = sum(POLY_AREA ))
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+```
+
+## Table 3 TAxPLP_CL
+
+```{r}
+
+layer_name = "TAxPLP_CL"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 35740
+
+#find number unique ids
+agg_data %>% pull(PLP_UID    ) %>% unique() %>% length()   # 35410
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(PLP_UID) %>% 
+  slice(which.max(PLP_AREA)) %>% 
+  dplyr::select(PLP_UID, TA)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "PLP_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(PLP_UID) %>% 
+  summarise(across(id:PLP_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+
+# aggregate to TA level
+
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    nprop = length(id),
+    PLP_AREA_tot  = sum(PLP_AREA ),
+    POLY_AREA_tot = sum(POLY_AREA ))
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+## Table 4 TAxPO_CL
+
+```{r}
+
+layer_name = "TAxPO_CL"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 33548
+
+#find number unique ids
+agg_data %>% pull(PO_UID    ) %>% unique() %>% length()   # 33534
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(PO_UID) %>% 
+  slice(which.max(PO_AREA)) %>% 
+  dplyr::select(PO_UID, TA)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "PO_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(PO_UID) %>% 
+  summarise(across(id:PO_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+
+# aggregate to TA level
+
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    nprop = length(PO_UID),
+    PO_CL_AREA_tot  = sum(PO_AREA ),
+    POLY_AREA_tot = sum(POLY_AREA ))
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+## Table 5 TA_MINUS_CL_01
+
+```{r}
+
+layer_name = "TA_MINUS_CL_01"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 9
+
+
+
+
+# aggregate to TA level
+
+agg_data_tidy_SBR = agg_data %>% 
+  dplyr::select(TA, POLY_AREA)
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+## Table 6 TA_MINUS_CL_02
+
+```{r}
+
+layer_name = "TA_MINUS_CL_02"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 9
+
+
+
+
+# aggregate to TA level
+
+agg_data_tidy_SBR = agg_data %>% 
+  dplyr::select(TA, POLY_AREA)
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+## Table 7 TA_MINUS_CL_03
+
+```{r}
+
+layer_name = "TA_MINUS_CL_03"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 9
+
+
+
+
+# aggregate to TA level
+
+agg_data_tidy_SBR = agg_data %>% 
+  dplyr::select(TA, POLY_AREA)
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+```
+
+## Table 8 TA_MINUS_CL_04
+
+```{r}
+
+layer_name = "TA_MINUS_CL_04"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 9
+
+
+
+
+# aggregate to TA level
+
+agg_data_tidy_SBR = agg_data %>% 
+  dplyr::select(TA, POLY_AREA)
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+
+## Table 9. TA_NCLxPLP_gt_1ha
+
+```{r}
+
+layer_name = "TA_NCLxPLP_gt_1ha"
+
+agg_layer_name_dn= paste0(datadir_rev,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number unique ids
+agg_data %>% pull(id) %>% unique() %>% length()   # 445163
+
+#get dup data
+agg_data_dup = agg_data %>% group_by(id) %>% filter(n()>1)
+
+#find number duplicates
+agg_data_dup %>% nrow() # 260670
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(PLP_UID) %>% 
+  slice(which.max(POLY_AREA)) %>% 
+  dplyr::select(PLP_UID, TA)
+
+#save this key for later analysis
+PLP_ID_TA_key_ffn = paste0(datadir, "PLP_ID_TA_key.RDS")
+saveRDS(ID_TA_key, PLP_ID_TA_key_ffn)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "PLP_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(id) %>% 
+  summarise(across(appellatio:PLP_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    nprop = length(id),
+    prop_area_tot = sum(POLY_AREA),
+    prop_area_avg = mean(POLY_AREA),
+    prop_area_med = median(POLY_AREA),
+    prop_area_min = min(POLY_AREA),
+    prop_area_max = max(POLY_AREA))
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+## Table 10. TA_NCLxML_gt_1ha
+
+```{r}
+
+layer_name = "TA_NCLxML_gt_1ha"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 18397
+
+
+#find number unique ids
+agg_data %>% pull(BLOCK_ID ) %>% unique() %>% length()   # 16256
+
+#get dup data
+agg_data_dup = agg_data %>% group_by(BLOCK_ID) %>% filter(n()>1)
+
+#find number duplicates
+agg_data_dup %>% nrow() # 2298
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(ML_UID) %>% 
+  slice(which.max(POLY_AREA)) %>% 
+  dplyr::select(ML_UID, BLOCK_ID, TA)
+
+#save this key for later analysis
+ML_ID_TA_key_ffn = paste0(datadir, "ML_ID_TA_key.RDS")
+saveRDS(ID_TA_key, ML_ID_TA_key_ffn)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  dplyr::select(-BLOCK_ID) %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "ML_UID")
+
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(BLOCK_ID) %>% 
+  summarise(across(BLOCK_NAME:ML_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+#total area
+agg_data_tidy %>% ungroup() %>% summarise(sum(POLY_AREA))
+
+agg_data_tidy %>% pull(Mgmt_DESC ) %>% unique()
+agg_data_tidy %>% pull(Mgmt_DESC ) %>% unique()
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    n_blocks = length(BLOCK_ID),
+    blocks_area_tot = sum(ML_AREA),
+    blocks_area_avg = mean(ML_AREA),
+    blocks_area_med = median(ML_AREA),
+    blocks_area_min = min(ML_AREA),
+    blocks_area_max = max(ML_AREA),
+    nshareholders_avg = mean(TOTAL_SHAR),
+    nowners_avg = mean(TOTAL_OWNE))
+
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+
+
+
+## Table 11. TA_NCLxLUM
+
+```{r}
+
+layer_name = "TA_NCLxLUM"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 525381
+
+#find number unique ids
+agg_data %>% pull(LUM_UID  ) %>% unique() %>% length()   # 521558
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(LUM_UID) %>% 
+  slice(which.max(POLY_AREA)) %>% 
+  dplyr::select(LUM_UID, TA)
+
+#save this key for later analysis
+LUM_ID_TA_key_ffn = paste0(datadir, "LUM_NCL_ID_TA_key.RDS")
+saveRDS(ID_TA_key, LUM_ID_TA_key_ffn)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "LUM_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(LUM_UID) %>% 
+  summarise(across(LUCID_2016:LUM_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+
+agg_data_tidy %>% pull(LUCID_1990  ) %>% unique()
+agg_data_tidy %>% pull(LUCID_2008  ) %>% unique()
+agg_data_tidy %>% pull(LUCID_2012  ) %>% unique()
+agg_data_tidy %>% pull(LUCID_2016  ) %>% unique()
+
+
+
+# aggregate to TA level - we should go with LUM_area_tot2 because LUM_area_tot could contain crown land
+
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    n_LUM_polys = length(LUM_UID ),
+    LUM_area_tot2 = sum(POLY_AREA),
+    LUCID_1990_71_AREA = sum(POLY_AREA[LUCID_1990 == 71]),
+    LUCID_1990_72_AREA = sum(POLY_AREA[LUCID_1990 == 72]),
+    LUCID_1990_73_AREA = sum(POLY_AREA[LUCID_1990 == 73]),
+    LUCID_1990_74_AREA = sum(POLY_AREA[LUCID_1990 == 74]),
+    LUCID_1990_75_AREA = sum(POLY_AREA[LUCID_1990 == 75]),
+    LUCID_1990_76_AREA = sum(POLY_AREA[LUCID_1990 == 76]),
+    LUCID_1990_77_AREA = sum(POLY_AREA[LUCID_1990 == 77]),
+    LUCID_1990_78_AREA = sum(POLY_AREA[LUCID_1990 == 78]),
+    LUCID_1990_79_AREA = sum(POLY_AREA[LUCID_1990 == 79]),
+    LUCID_1990_80_AREA = sum(POLY_AREA[LUCID_1990 == 80]),
+    LUCID_1990_81_AREA = sum(POLY_AREA[LUCID_1990 == 81]),
+    LUCID_1990_82_AREA = sum(POLY_AREA[LUCID_1990 == 82]),
+    
+    LUCID_2008_71_AREA = sum(POLY_AREA[LUCID_2008 == 71]),
+    LUCID_2008_72_AREA = sum(POLY_AREA[LUCID_2008 == 72]),
+    LUCID_2008_73_AREA = sum(POLY_AREA[LUCID_2008 == 73]),
+    LUCID_2008_74_AREA = sum(POLY_AREA[LUCID_2008 == 74]),
+    LUCID_2008_75_AREA = sum(POLY_AREA[LUCID_2008 == 75]),
+    LUCID_2008_76_AREA = sum(POLY_AREA[LUCID_2008 == 76]),
+    LUCID_2008_77_AREA = sum(POLY_AREA[LUCID_2008 == 77]),
+    LUCID_2008_78_AREA = sum(POLY_AREA[LUCID_2008 == 78]),
+    LUCID_2008_79_AREA = sum(POLY_AREA[LUCID_2008 == 79]),
+    LUCID_2008_80_AREA = sum(POLY_AREA[LUCID_2008 == 80]),
+    LUCID_2008_81_AREA = sum(POLY_AREA[LUCID_2008 == 81]),
+    LUCID_2008_82_AREA = sum(POLY_AREA[LUCID_2008 == 82]),
+    
+    LUCID_2012_71_AREA = sum(POLY_AREA[LUCID_2012 == 71]),
+    LUCID_2012_72_AREA = sum(POLY_AREA[LUCID_2012 == 72]),
+    LUCID_2012_73_AREA = sum(POLY_AREA[LUCID_2012 == 73]),
+    LUCID_2012_74_AREA = sum(POLY_AREA[LUCID_2012 == 74]),
+    LUCID_2012_75_AREA = sum(POLY_AREA[LUCID_2012 == 75]),
+    LUCID_2012_76_AREA = sum(POLY_AREA[LUCID_2012 == 76]),
+    LUCID_2012_77_AREA = sum(POLY_AREA[LUCID_2012 == 77]),
+    LUCID_2012_78_AREA = sum(POLY_AREA[LUCID_2012 == 78]),
+    LUCID_2012_79_AREA = sum(POLY_AREA[LUCID_2012 == 79]),
+    LUCID_2012_80_AREA = sum(POLY_AREA[LUCID_2012 == 80]),
+    LUCID_2012_81_AREA = sum(POLY_AREA[LUCID_2012 == 81]),
+    LUCID_2012_82_AREA = sum(POLY_AREA[LUCID_2012 == 82]),
+    
+    LUCID_2016_71_AREA = sum(POLY_AREA[LUCID_2016 == 71]),
+    LUCID_2016_72_AREA = sum(POLY_AREA[LUCID_2016 == 72]),
+    LUCID_2016_73_AREA = sum(POLY_AREA[LUCID_2016 == 73]),
+    LUCID_2016_74_AREA = sum(POLY_AREA[LUCID_2016 == 74]),
+    LUCID_2016_75_AREA = sum(POLY_AREA[LUCID_2016 == 75]),
+    LUCID_2016_76_AREA = sum(POLY_AREA[LUCID_2016 == 76]),
+    LUCID_2016_77_AREA = sum(POLY_AREA[LUCID_2016 == 77]),
+    LUCID_2016_78_AREA = sum(POLY_AREA[LUCID_2016 == 78]),
+    LUCID_2016_79_AREA = sum(POLY_AREA[LUCID_2016 == 79]),
+    LUCID_2016_80_AREA = sum(POLY_AREA[LUCID_2016 == 80]),
+    LUCID_2016_81_AREA = sum(POLY_AREA[LUCID_2016 == 81]),
+    LUCID_2016_82_AREA = sum(POLY_AREA[LUCID_2016 == 82])
+  )
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+
+## Table 12. TA_NCLxAB_LP0012_gt_1ha
+
+```{r}
+
+layer_name = "TA_NCLxAB_LP0012_gt_1ha"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 284812
+
+#get total area
+agg_data %>% group_by(TA) %>% summarise(POLY_AREA = sum(POLY_AREA))
+
+
+#find number unique ids
+agg_data %>% pull(farm_id ) %>% unique() %>% length() # 94617
+agg_data %>% pull(AB_UID ) %>% unique() %>% length()  # 94617
+
+#get dup data
+agg_data_dup = agg_data %>% group_by(AB_UID) %>% filter(n()>1)
+
+#find number duplicates
+agg_data_dup %>% nrow() # 199404
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(AB_UID) %>% 
+  slice(which.max(POLY_AREA)) %>% 
+  dplyr::select(AB_UID, TA)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "AB_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(AB_UID) %>% 
+  summarise(across(farm_id :AB_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+names(agg_data_tidy)
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    n_blocks = length(farm_id),
+    farm_area_tot = sum(AB_AREA),
+    farm_area_avg = mean(AB_AREA),
+    farm_area_med = median(AB_AREA),
+    farm_area_min = min(AB_AREA),
+    farm_area_max = max(AB_AREA),
+    across(contains("_nos"),sum),
+    across(contains("_ha"),sum))
+
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+```
+
+
+## Table 13A. TA_NCLxML
+
+```{r}
+
+layer_name = "TA_NCLxML"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data %>% 
+  dplyr::select(TA, POLY_AREA)
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+
+
+
+## Table 13B. TA_NCLxGT
+
+```{r}
+
+layer_name = "TA_NCLxGT"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+agg_data %>% summarise(sum(POLY_AREA))
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data %>% 
+  dplyr::select(TA, POLY_AREA)
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+## Table 14. TA_NCLxMLxLUM
+
+```{r}
+
+layer_name = "NCLxMLxLUM"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 97340
+
+#find number unique ids
+agg_data %>% pull(BLOCK_I ) %>% unique() %>% length() # 16255
+
+
+#grab the LUM_ID_TA_key created in the analysis of table 10 above
+ML_ID_TA_key_ffn = paste0(datadir, "ML_ID_TA_key.RDS")
+ML_ID_TA_key = readRDS(LUM_ID_TA_key_ffn)
+
+# update the TA to make sure the polygons are assigned to the correct TA
+# (and save the old TA assignation to "TA_OLD")
+
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ML_ID_TA_key, by = "ML_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(ML_UID, LUM_UID) %>% 
+  summarise(across(BLOCK_I :LUM_ARE, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) ) %>% 
+  rename(
+    BLOCK_ID = BLOCK_I,
+    BLOCK_NAME = BLOCK_N,
+    LUCID_2008 =LUCID_200,
+    LUCNA_2008 = LUCNA_200,
+    SUBID_2008 = SUBID_200,
+    SUBNAID_2008 = SUBNA_200,
+    LUCID_1990 = LUCID_1, 
+    LUCNA_1990 = LUCNA_1,
+    LUM_AREA = LUM_ARE)
+
+names(agg_data_tidy)
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    n_blocks = length(BLOCK_ID),
+    blocks_area_tot = sum(ML_AREA),
+    blocks_area_avg = mean(ML_AREA),
+    blocks_area_med = median(ML_AREA),
+    blocks_area_min = min(ML_AREA),
+    blocks_area_max = max(ML_AREA),
+    LUCID_1990_71_AREA = sum(POLY_AREA[LUCID_1990 == 71]),
+    LUCID_1990_72_AREA = sum(POLY_AREA[LUCID_1990 == 72]),
+    LUCID_1990_73_AREA = sum(POLY_AREA[LUCID_1990 == 73]),
+    LUCID_1990_74_AREA = sum(POLY_AREA[LUCID_1990 == 74]),
+    LUCID_1990_75_AREA = sum(POLY_AREA[LUCID_1990 == 75]),
+    LUCID_1990_76_AREA = sum(POLY_AREA[LUCID_1990 == 76]),
+    LUCID_1990_77_AREA = sum(POLY_AREA[LUCID_1990 == 77]),
+    LUCID_1990_78_AREA = sum(POLY_AREA[LUCID_1990 == 78]),
+    LUCID_1990_79_AREA = sum(POLY_AREA[LUCID_1990 == 79]),
+    LUCID_1990_80_AREA = sum(POLY_AREA[LUCID_1990 == 80]),
+    LUCID_1990_81_AREA = sum(POLY_AREA[LUCID_1990 == 81]),
+    LUCID_1990_82_AREA = sum(POLY_AREA[LUCID_1990 == 82]),
+    
+    LUCID_2008_71_AREA = sum(POLY_AREA[LUCID_2008 == 71]),
+    LUCID_2008_72_AREA = sum(POLY_AREA[LUCID_2008 == 72]),
+    LUCID_2008_73_AREA = sum(POLY_AREA[LUCID_2008 == 73]),
+    LUCID_2008_74_AREA = sum(POLY_AREA[LUCID_2008 == 74]),
+    LUCID_2008_75_AREA = sum(POLY_AREA[LUCID_2008 == 75]),
+    LUCID_2008_76_AREA = sum(POLY_AREA[LUCID_2008 == 76]),
+    LUCID_2008_77_AREA = sum(POLY_AREA[LUCID_2008 == 77]),
+    LUCID_2008_78_AREA = sum(POLY_AREA[LUCID_2008 == 78]),
+    LUCID_2008_79_AREA = sum(POLY_AREA[LUCID_2008 == 79]),
+    LUCID_2008_80_AREA = sum(POLY_AREA[LUCID_2008 == 80]),
+    LUCID_2008_81_AREA = sum(POLY_AREA[LUCID_2008 == 81]),
+    LUCID_2008_82_AREA = sum(POLY_AREA[LUCID_2008 == 82]),
+    
+    LUCID_2012_71_AREA = sum(POLY_AREA[LUCID_2012 == 71]),
+    LUCID_2012_72_AREA = sum(POLY_AREA[LUCID_2012 == 72]),
+    LUCID_2012_73_AREA = sum(POLY_AREA[LUCID_2012 == 73]),
+    LUCID_2012_74_AREA = sum(POLY_AREA[LUCID_2012 == 74]),
+    LUCID_2012_75_AREA = sum(POLY_AREA[LUCID_2012 == 75]),
+    LUCID_2012_76_AREA = sum(POLY_AREA[LUCID_2012 == 76]),
+    LUCID_2012_77_AREA = sum(POLY_AREA[LUCID_2012 == 77]),
+    LUCID_2012_78_AREA = sum(POLY_AREA[LUCID_2012 == 78]),
+    LUCID_2012_79_AREA = sum(POLY_AREA[LUCID_2012 == 79]),
+    LUCID_2012_80_AREA = sum(POLY_AREA[LUCID_2012 == 80]),
+    LUCID_2012_81_AREA = sum(POLY_AREA[LUCID_2012 == 81]),
+    LUCID_2012_82_AREA = sum(POLY_AREA[LUCID_2012 == 82]),
+    
+    LUCID_2016_71_AREA = sum(POLY_AREA[LUCID_2016 == 71]),
+    LUCID_2016_72_AREA = sum(POLY_AREA[LUCID_2016 == 72]),
+    LUCID_2016_73_AREA = sum(POLY_AREA[LUCID_2016 == 73]),
+    LUCID_2016_74_AREA = sum(POLY_AREA[LUCID_2016 == 74]),
+    LUCID_2016_75_AREA = sum(POLY_AREA[LUCID_2016 == 75]),
+    LUCID_2016_76_AREA = sum(POLY_AREA[LUCID_2016 == 76]),
+    LUCID_2016_77_AREA = sum(POLY_AREA[LUCID_2016 == 77]),
+    LUCID_2016_78_AREA = sum(POLY_AREA[LUCID_2016 == 78]),
+    LUCID_2016_79_AREA = sum(POLY_AREA[LUCID_2016 == 79]),
+    LUCID_2016_80_AREA = sum(POLY_AREA[LUCID_2016 == 80]),
+    LUCID_2016_81_AREA = sum(POLY_AREA[LUCID_2016 == 81]),
+    LUCID_2016_82_AREA = sum(POLY_AREA[LUCID_2016 == 82])
+  )
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+```
+
+## Table 15 TA_NCLxPLP_gt_1haxGT
+
+```{r}
+
+layer_name = "TA_NCLxPLP_gt_1haxGT"
+
+agg_layer_name_dn= paste0(datadir_rev,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+# agg_data = agg_data %>% 
+# rename(PLP_AREA = PLP_ARE)
+
+agg_data %>% summarise(sum(POLY_AREA))
+
+#find number rows
+agg_data %>% nrow()   # 6299605
+
+#find number unique ids
+agg_data %>% pull(PLP_UID    ) %>% unique() %>% length()   # 35410
+
+#load the PLP_ID_TA key created in Table 9 Analysis
+PLP_ID_TA_key_ffn = paste0(datadir, "PLP_ID_TA_key.RDS")
+ID_TA_key = readRDS(PLP_ID_TA_key_ffn)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "PLP_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(PLP_UID) %>% 
+  summarise(across(id:PLP_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+
+# aggregate to TA level
+
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    nprop = length(id),
+    PLP_AREA_tot  = sum(PLP_AREA ),
+    POLY_AREA_tot = sum(POLY_AREA ))
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+
+
+
+## Table 16 TA_NCLxPLP_gt_1haxML
+
+```{r}
+
+layer_name = "TA_NCLxPLP_gt_1haxML"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+# agg_data = agg_data %>% 
+#   rename(PLP_AREA = PLP_AREA,
+#          BLOCK_ID =  BLOCK_I,
+#          BLOCK_NAME = BLOCK_N)
+
+
+#find number rows
+agg_data %>% nrow()   # 6299605
+
+#find number unique ids
+agg_data %>% pull(PLP_UID    ) %>% unique() %>% length()   # 35410
+
+agg_data %>% ungroup() %>% summarise(sum(POLY_AREA))
+
+
+#load the PLP_ID_TA key created in Table 9 Analysis
+PLP_ID_TA_key_ffn = paste0(datadir, "PLP_ID_TA_key.RDS")
+ID_TA_key = readRDS(PLP_ID_TA_key_ffn)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "PLP_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+# assume that a parcel can only belong to one ML Block
+agg_data_tidy = agg_data %>% 
+  group_by(PLP_UID) %>% 
+  summarise(across(id:PLP_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    nprop = length(id),
+    PLP_AREA_tot  = sum(PLP_AREA ),
+    POLY_AREA_tot = sum(POLY_AREA ))
+
+# write to spreadsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+```
+
+
+
+## Table 17 TA_NLCxPLPxMLxLUM.shp
+
+```{r}
+
+layer_name = "TA_NLCxPLPxMLxLUM"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+agg_data = agg_data %>% 
+  rename(PLP_AREA = PLP_ARE,
+         BLOCK_ID =  BLOCK_I,
+         BLOCK_NAME = BLOCK_N,
+         LUCID_2008 =LUCID_200,
+         LUCNA_2008 = LUCNA_200,
+         SUBID_2008 = SUBID_200,
+         SUBNAID_2008 = SUBNA_200,
+         LUCID_1990 = LUCID_1, 
+         LUCNA_1990 = LUCNA_1,
+         LUM_AREA = LUM_ARE)
+
+
+#find number rows
+agg_data %>% nrow()   # 202374
+
+#find number unique ids
+agg_data %>% pull(BLOCK_ID    ) %>% unique() %>% length()   # 22311
+
+#load the ML_ID_TA key created in Table 10 Analysis
+ML_ID_TA_key_ffn = paste0(datadir, "ML_ID_TA_key.RDS")
+ID_TA_key = readRDS(ML_ID_TA_key_ffn)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "BLOCK_ID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+# assume that a parcel can only belong to one ML Block
+agg_data_tidy = agg_data %>% 
+  group_by(ML_UID, LUM_UID ) %>% 
+  summarise(across(id:LUM_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_tidy %>%
+  ungroup() %>% 
+  group_by(TA) %>% 
+  summarise(
+    nprop = length(id),
+    PLP_AREA_tot  = sum(PLP_AREA ),
+    POLY_AREA_tot = sum(POLY_AREA ),
+    LUCID_1990_71_AREA = sum(POLY_AREA[LUCID_1990 == 71]),
+    LUCID_1990_72_AREA = sum(POLY_AREA[LUCID_1990 == 72]),
+    LUCID_1990_73_AREA = sum(POLY_AREA[LUCID_1990 == 73]),
+    LUCID_1990_74_AREA = sum(POLY_AREA[LUCID_1990 == 74]),
+    LUCID_1990_75_AREA = sum(POLY_AREA[LUCID_1990 == 75]),
+    LUCID_1990_76_AREA = sum(POLY_AREA[LUCID_1990 == 76]),
+    LUCID_1990_77_AREA = sum(POLY_AREA[LUCID_1990 == 77]),
+    LUCID_1990_78_AREA = sum(POLY_AREA[LUCID_1990 == 78]),
+    LUCID_1990_79_AREA = sum(POLY_AREA[LUCID_1990 == 79]),
+    LUCID_1990_80_AREA = sum(POLY_AREA[LUCID_1990 == 80]),
+    LUCID_1990_81_AREA = sum(POLY_AREA[LUCID_1990 == 81]),
+    LUCID_1990_82_AREA = sum(POLY_AREA[LUCID_1990 == 82]),
+    
+    LUCID_2008_71_AREA = sum(POLY_AREA[LUCID_2008 == 71]),
+    LUCID_2008_72_AREA = sum(POLY_AREA[LUCID_2008 == 72]),
+    LUCID_2008_73_AREA = sum(POLY_AREA[LUCID_2008 == 73]),
+    LUCID_2008_74_AREA = sum(POLY_AREA[LUCID_2008 == 74]),
+    LUCID_2008_75_AREA = sum(POLY_AREA[LUCID_2008 == 75]),
+    LUCID_2008_76_AREA = sum(POLY_AREA[LUCID_2008 == 76]),
+    LUCID_2008_77_AREA = sum(POLY_AREA[LUCID_2008 == 77]),
+    LUCID_2008_78_AREA = sum(POLY_AREA[LUCID_2008 == 78]),
+    LUCID_2008_79_AREA = sum(POLY_AREA[LUCID_2008 == 79]),
+    LUCID_2008_80_AREA = sum(POLY_AREA[LUCID_2008 == 80]),
+    LUCID_2008_81_AREA = sum(POLY_AREA[LUCID_2008 == 81]),
+    LUCID_2008_82_AREA = sum(POLY_AREA[LUCID_2008 == 82]),
+    
+    LUCID_2012_71_AREA = sum(POLY_AREA[LUCID_2012 == 71]),
+    LUCID_2012_72_AREA = sum(POLY_AREA[LUCID_2012 == 72]),
+    LUCID_2012_73_AREA = sum(POLY_AREA[LUCID_2012 == 73]),
+    LUCID_2012_74_AREA = sum(POLY_AREA[LUCID_2012 == 74]),
+    LUCID_2012_75_AREA = sum(POLY_AREA[LUCID_2012 == 75]),
+    LUCID_2012_76_AREA = sum(POLY_AREA[LUCID_2012 == 76]),
+    LUCID_2012_77_AREA = sum(POLY_AREA[LUCID_2012 == 77]),
+    LUCID_2012_78_AREA = sum(POLY_AREA[LUCID_2012 == 78]),
+    LUCID_2012_79_AREA = sum(POLY_AREA[LUCID_2012 == 79]),
+    LUCID_2012_80_AREA = sum(POLY_AREA[LUCID_2012 == 80]),
+    LUCID_2012_81_AREA = sum(POLY_AREA[LUCID_2012 == 81]),
+    LUCID_2012_82_AREA = sum(POLY_AREA[LUCID_2012 == 82]),
+    
+    LUCID_2016_71_AREA = sum(POLY_AREA[LUCID_2016 == 71]),
+    LUCID_2016_72_AREA = sum(POLY_AREA[LUCID_2016 == 72]),
+    LUCID_2016_73_AREA = sum(POLY_AREA[LUCID_2016 == 73]),
+    LUCID_2016_74_AREA = sum(POLY_AREA[LUCID_2016 == 74]),
+    LUCID_2016_75_AREA = sum(POLY_AREA[LUCID_2016 == 75]),
+    LUCID_2016_76_AREA = sum(POLY_AREA[LUCID_2016 == 76]),
+    LUCID_2016_77_AREA = sum(POLY_AREA[LUCID_2016 == 77]),
+    LUCID_2016_78_AREA = sum(POLY_AREA[LUCID_2016 == 78]),
+    LUCID_2016_79_AREA = sum(POLY_AREA[LUCID_2016 == 79]),
+    LUCID_2016_80_AREA = sum(POLY_AREA[LUCID_2016 == 80]),
+    LUCID_2016_81_AREA = sum(POLY_AREA[LUCID_2016 == 81]),
+    LUCID_2016_82_AREA = sum(POLY_AREA[LUCID_2016 == 82]))
+
+# write to spreadsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+}
+
+
+```
+
+
+## Table 18 TA_NLCxPLPxGTxLUM.shp
+
+```{r}
+
+layer_name = "TA_NLCxPLPxGTxLUM"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+agg_data = agg_data %>% 
+  rename(PLP_AREA = PLP_ARE,
+         LUCID_2008 =LUCID_200,
+         LUCNA_2008 = LUCNA_200,
+         SUBID_2008 = SUBID_200,
+         SUBNAID_2008 = SUBNA_200,
+         LUCID_1990 = LUCID_1, 
+         LUCNA_1990 = LUCNA_1,
+         LUM_AREA = LUM_ARE)
+
+
+#find number rows
+agg_data %>% nrow()   # 1791098
+
+#find number unique ids
+agg_data %>% pull(id    ) %>% unique() %>% length()   # 422109
+
+#load the PLP_ID_TA key created in Table 10 Analysis
+PLP_ID_TA_key_ffn = paste0(datadir, "PLP_ID_TA_key.RDS")
+ID_TA_key = readRDS(PLP_ID_TA_key_ffn)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "PLP_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+# assume that a parcel can only belong to one ML Block
+agg_data_grp = agg_data %>% 
+  group_by(PLP_UID, LUM_UID ) 
+
+
+agg_data_grp_tidy = agg_data_grp %>% 
+  summarise(
+    across(id:LUM_AREA, first),
+    POLY_AREA =sum(POLY_AREA) ,
+    TA = first(TA)
+  )
+
+
+gc()
+
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_grp_tidy %>%
+  ungroup() %>% 
+  group_by(TA) %>% 
+  summarise(
+    nprop = length(id),
+    PLP_AREA_tot  = sum(PLP_AREA ),
+    POLY_AREA_tot = sum(POLY_AREA ),
+    LUCID_1990_71_AREA = sum(POLY_AREA[LUCID_1990 == 71]),
+    LUCID_1990_72_AREA = sum(POLY_AREA[LUCID_1990 == 72]),
+    LUCID_1990_73_AREA = sum(POLY_AREA[LUCID_1990 == 73]),
+    LUCID_1990_74_AREA = sum(POLY_AREA[LUCID_1990 == 74]),
+    LUCID_1990_75_AREA = sum(POLY_AREA[LUCID_1990 == 75]),
+    LUCID_1990_76_AREA = sum(POLY_AREA[LUCID_1990 == 76]),
+    LUCID_1990_77_AREA = sum(POLY_AREA[LUCID_1990 == 77]),
+    LUCID_1990_78_AREA = sum(POLY_AREA[LUCID_1990 == 78]),
+    LUCID_1990_79_AREA = sum(POLY_AREA[LUCID_1990 == 79]),
+    LUCID_1990_80_AREA = sum(POLY_AREA[LUCID_1990 == 80]),
+    LUCID_1990_81_AREA = sum(POLY_AREA[LUCID_1990 == 81]),
+    LUCID_1990_82_AREA = sum(POLY_AREA[LUCID_1990 == 82]),
+    
+    LUCID_2008_71_AREA = sum(POLY_AREA[LUCID_2008 == 71]),
+    LUCID_2008_72_AREA = sum(POLY_AREA[LUCID_2008 == 72]),
+    LUCID_2008_73_AREA = sum(POLY_AREA[LUCID_2008 == 73]),
+    LUCID_2008_74_AREA = sum(POLY_AREA[LUCID_2008 == 74]),
+    LUCID_2008_75_AREA = sum(POLY_AREA[LUCID_2008 == 75]),
+    LUCID_2008_76_AREA = sum(POLY_AREA[LUCID_2008 == 76]),
+    LUCID_2008_77_AREA = sum(POLY_AREA[LUCID_2008 == 77]),
+    LUCID_2008_78_AREA = sum(POLY_AREA[LUCID_2008 == 78]),
+    LUCID_2008_79_AREA = sum(POLY_AREA[LUCID_2008 == 79]),
+    LUCID_2008_80_AREA = sum(POLY_AREA[LUCID_2008 == 80]),
+    LUCID_2008_81_AREA = sum(POLY_AREA[LUCID_2008 == 81]),
+    LUCID_2008_82_AREA = sum(POLY_AREA[LUCID_2008 == 82]),
+    
+    LUCID_2012_71_AREA = sum(POLY_AREA[LUCID_2012 == 71]),
+    LUCID_2012_72_AREA = sum(POLY_AREA[LUCID_2012 == 72]),
+    LUCID_2012_73_AREA = sum(POLY_AREA[LUCID_2012 == 73]),
+    LUCID_2012_74_AREA = sum(POLY_AREA[LUCID_2012 == 74]),
+    LUCID_2012_75_AREA = sum(POLY_AREA[LUCID_2012 == 75]),
+    LUCID_2012_76_AREA = sum(POLY_AREA[LUCID_2012 == 76]),
+    LUCID_2012_77_AREA = sum(POLY_AREA[LUCID_2012 == 77]),
+    LUCID_2012_78_AREA = sum(POLY_AREA[LUCID_2012 == 78]),
+    LUCID_2012_79_AREA = sum(POLY_AREA[LUCID_2012 == 79]),
+    LUCID_2012_80_AREA = sum(POLY_AREA[LUCID_2012 == 80]),
+    LUCID_2012_81_AREA = sum(POLY_AREA[LUCID_2012 == 81]),
+    LUCID_2012_82_AREA = sum(POLY_AREA[LUCID_2012 == 82]),
+    
+    LUCID_2016_71_AREA = sum(POLY_AREA[LUCID_2016 == 71]),
+    LUCID_2016_72_AREA = sum(POLY_AREA[LUCID_2016 == 72]),
+    LUCID_2016_73_AREA = sum(POLY_AREA[LUCID_2016 == 73]),
+    LUCID_2016_74_AREA = sum(POLY_AREA[LUCID_2016 == 74]),
+    LUCID_2016_75_AREA = sum(POLY_AREA[LUCID_2016 == 75]),
+    LUCID_2016_76_AREA = sum(POLY_AREA[LUCID_2016 == 76]),
+    LUCID_2016_77_AREA = sum(POLY_AREA[LUCID_2016 == 77]),
+    LUCID_2016_78_AREA = sum(POLY_AREA[LUCID_2016 == 78]),
+    LUCID_2016_79_AREA = sum(POLY_AREA[LUCID_2016 == 79]),
+    LUCID_2016_80_AREA = sum(POLY_AREA[LUCID_2016 == 80]),
+    LUCID_2016_81_AREA = sum(POLY_AREA[LUCID_2016 == 81]),
+    LUCID_2016_82_AREA = sum(POLY_AREA[LUCID_2016 == 82]))
+
+
+# write to spreadsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+}
+
+
+```
+
+
+## Table 19 TAxLUM.shp
+
+```{r}
+
+layer_name = "TAxLUM"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#find number rows
+agg_data %>% nrow()   # 525381
+
+#find number unique ids
+agg_data %>% pull(LUM_UID  ) %>% unique() %>% length()   # 521558
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(LUM_UID) %>% 
+  slice(which.max(POLY_AREA)) %>% 
+  dplyr::select(LUM_UID, TA)
+
+#save this key for later analysis
+LUM_ID_TA_key_ffn = paste0(datadir, "ID_TA_key.RDS")
+saveRDS(ID_TA_key, LUM_ID_TA_key_ffn)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "LUM_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(LUM_UID) %>% 
+  summarise(across(LUCID_2016:SHAPE_Leng , first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+
+agg_data_tidy %>% pull(LUCID_1990  ) %>% unique()
+agg_data_tidy %>% pull(LUCID_2008  ) %>% unique()
+agg_data_tidy %>% pull(LUCID_2012  ) %>% unique()
+agg_data_tidy %>% pull(LUCID_2016  ) %>% unique()
+
+
+
+# aggregate to TA level - we should go with LUM_area_tot2 because LUM_area_tot could contain crown land
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    n_LUM_polys = length(LUM_UID ),
+    LUM_area_tot2 = sum(POLY_AREA),
+    LUCID_1990_71_AREA = sum(POLY_AREA[LUCID_1990 == 71]),
+    LUCID_1990_72_AREA = sum(POLY_AREA[LUCID_1990 == 72]),
+    LUCID_1990_73_AREA = sum(POLY_AREA[LUCID_1990 == 73]),
+    LUCID_1990_74_AREA = sum(POLY_AREA[LUCID_1990 == 74]),
+    LUCID_1990_75_AREA = sum(POLY_AREA[LUCID_1990 == 75]),
+    LUCID_1990_76_AREA = sum(POLY_AREA[LUCID_1990 == 76]),
+    LUCID_1990_77_AREA = sum(POLY_AREA[LUCID_1990 == 77]),
+    LUCID_1990_78_AREA = sum(POLY_AREA[LUCID_1990 == 78]),
+    LUCID_1990_79_AREA = sum(POLY_AREA[LUCID_1990 == 79]),
+    LUCID_1990_80_AREA = sum(POLY_AREA[LUCID_1990 == 80]),
+    LUCID_1990_81_AREA = sum(POLY_AREA[LUCID_1990 == 81]),
+    LUCID_1990_82_AREA = sum(POLY_AREA[LUCID_1990 == 82]),
+    
+    LUCID_2008_71_AREA = sum(POLY_AREA[LUCID_2008 == 71]),
+    LUCID_2008_72_AREA = sum(POLY_AREA[LUCID_2008 == 72]),
+    LUCID_2008_73_AREA = sum(POLY_AREA[LUCID_2008 == 73]),
+    LUCID_2008_74_AREA = sum(POLY_AREA[LUCID_2008 == 74]),
+    LUCID_2008_75_AREA = sum(POLY_AREA[LUCID_2008 == 75]),
+    LUCID_2008_76_AREA = sum(POLY_AREA[LUCID_2008 == 76]),
+    LUCID_2008_77_AREA = sum(POLY_AREA[LUCID_2008 == 77]),
+    LUCID_2008_78_AREA = sum(POLY_AREA[LUCID_2008 == 78]),
+    LUCID_2008_79_AREA = sum(POLY_AREA[LUCID_2008 == 79]),
+    LUCID_2008_80_AREA = sum(POLY_AREA[LUCID_2008 == 80]),
+    LUCID_2008_81_AREA = sum(POLY_AREA[LUCID_2008 == 81]),
+    LUCID_2008_82_AREA = sum(POLY_AREA[LUCID_2008 == 82]),
+    
+    LUCID_2012_71_AREA = sum(POLY_AREA[LUCID_2012 == 71]),
+    LUCID_2012_72_AREA = sum(POLY_AREA[LUCID_2012 == 72]),
+    LUCID_2012_73_AREA = sum(POLY_AREA[LUCID_2012 == 73]),
+    LUCID_2012_74_AREA = sum(POLY_AREA[LUCID_2012 == 74]),
+    LUCID_2012_75_AREA = sum(POLY_AREA[LUCID_2012 == 75]),
+    LUCID_2012_76_AREA = sum(POLY_AREA[LUCID_2012 == 76]),
+    LUCID_2012_77_AREA = sum(POLY_AREA[LUCID_2012 == 77]),
+    LUCID_2012_78_AREA = sum(POLY_AREA[LUCID_2012 == 78]),
+    LUCID_2012_79_AREA = sum(POLY_AREA[LUCID_2012 == 79]),
+    LUCID_2012_80_AREA = sum(POLY_AREA[LUCID_2012 == 80]),
+    LUCID_2012_81_AREA = sum(POLY_AREA[LUCID_2012 == 81]),
+    LUCID_2012_82_AREA = sum(POLY_AREA[LUCID_2012 == 82]),
+    
+    LUCID_2016_71_AREA = sum(POLY_AREA[LUCID_2016 == 71]),
+    LUCID_2016_72_AREA = sum(POLY_AREA[LUCID_2016 == 72]),
+    LUCID_2016_73_AREA = sum(POLY_AREA[LUCID_2016 == 73]),
+    LUCID_2016_74_AREA = sum(POLY_AREA[LUCID_2016 == 74]),
+    LUCID_2016_75_AREA = sum(POLY_AREA[LUCID_2016 == 75]),
+    LUCID_2016_76_AREA = sum(POLY_AREA[LUCID_2016 == 76]),
+    LUCID_2016_77_AREA = sum(POLY_AREA[LUCID_2016 == 77]),
+    LUCID_2016_78_AREA = sum(POLY_AREA[LUCID_2016 == 78]),
+    LUCID_2016_79_AREA = sum(POLY_AREA[LUCID_2016 == 79]),
+    LUCID_2016_80_AREA = sum(POLY_AREA[LUCID_2016 == 80]),
+    LUCID_2016_81_AREA = sum(POLY_AREA[LUCID_2016 == 81]),
+    LUCID_2016_82_AREA = sum(POLY_AREA[LUCID_2016 == 82])
+  )
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+# calculate the area of P89-natural, P89-planted and P89-wildling
+
+agg_data_tidy %>% pull(TA) %>% unique()
+
+P89_Forests_LUM_AREAS = agg_data %>% 
+  filter(LUCID_2016 == 73) %>% 
+  mutate(
+    LUCSUBID_2016 = LUCID_2016*1e4+SUBID_2016,
+    P89_SUBCLASS = case_when(
+      LUCSUBID_2016 == 730204 ~ "P89_nat",
+      LUCSUBID_2016 == 730122 ~ "P89_wlg",
+      TRUE ~ "P89_pld")
+  ) %>% 
+  group_by(TA, P89_SUBCLASS) %>% 
+  summarise(POLY_AREA = sum(POLY_AREA)) %>% 
+  spread(P89_SUBCLASS , POLY_AREA) %>% 
+  mutate(
+    across(1:3, replace_na, 0),
+    P89_not_pld = P89_nat + P89_wlg,
+    P89_total = P89_pld + P89_not_pld)
+
+
+P89_Forests_LUM_AREAS %>% pull(TA) %>% unique()
+
+P89_Forests_LUM_AREAS_ffn = paste0(datadir, "P89_Forests_LUM_AREAS.RDS")
+saveRDS(P89_Forests_LUM_AREAS,P89_Forests_LUM_AREAS_ffn)
+
+P89_Forests_LUM_AREAS_csv_ffn = paste0(datadir, "P89_Forests_LUM_AREAS.csv")
+write_csv(P89_Forests_LUM_AREAS,P89_Forests_LUM_AREAS_csv_ffn)
+
+
+```
+
+
+## Table 21 TAxABxML
+
+```{r}
+
+layer_name = "TAxABxML"
+
+agg_layer_name_dn= paste0(datadir_rev,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+
+agg_data %>% pull(TA) %>% unique()
+
+
+#get total area
+agg_data %>% summarise(POLY_AREA = sum(POLY_AREA))
+
+#get total area
+agg_data %>% group_by(TA) %>% summarise(POLY_AREA = sum(POLY_AREA))
+
+
+#find number rows
+agg_data %>% nrow()   # 44824
+
+#find number unique ids
+agg_data %>% pull(farm_id ) %>% unique() %>% length() # 8149
+agg_data %>% pull(AB_UID ) %>% unique() %>% length()  # 8149
+
+#get dup data
+agg_data_dup = agg_data %>% group_by(AB_UID) %>% filter(n()>1)
+
+#find number duplicates
+agg_data_dup %>% nrow() # 41364
+
+# #create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>%
+  group_by(AB_UID) %>%
+  slice(which.max(POLY_AREA)) %>%
+  dplyr::select(AB_UID, TA)
+# 
+# # update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>%
+  rename(TA_OLD = TA) %>%
+  left_join(ID_TA_key, by = "AB_UID")
+# 
+# # tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>%
+  group_by(AB_UID, TA, BLOCK_ID) %>%
+  summarise(across(farm_id :AB_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+agg_data_tidy_mdf = agg_data %>%
+  ungroup() %>%
+  group_by(farm_id) %>%
+  slice(which.max(AB_AREA))
+
+agg_data_tidy_mdf2 = agg_data %>%
+  ungroup() %>%
+  group_by(farm_id) %>%
+  slice(1)
+
+
+
+
+
+agg_data %>% ungroup() %>% summarise(across(contains("AREA"),sum))
+agg_data_tidy %>% ungroup() %>% summarise(across(contains("AREA"),sum))
+agg_data_tidy_mdf %>% ungroup() %>% summarise(across(contains("AREA"),sum))
+agg_data_tidy_mdf2 %>% ungroup() %>% summarise(across(contains("AREA"),sum))
+
+agg_data_tidy %>% pull(TA) %>% unique()
+
+#===========================================================================
+#===========================================================================
+# CALCULATE EMISSIONS FOR ML HERE ---
+#===========================================================================
+#===========================================================================
+
+TAxABxML_tidy_w_ems = agg_data_tidy_mdf2 %>% 
+  calc_livestock_emissions()
+
+TAxABxML_tidy_w_ems_ffn = paste0(datadir, "TAxABxML_tidy_w_ems.RDS")
+saveRDS(TAxABxML_tidy_w_ems,TAxABxML_tidy_w_ems_ffn)
+
+#===========================================================================
+#===========================================================================
+# EMISSIONS ARE SUMMARISED IN LP0012_mainline_rev ----
+#===========================================================================
+#===========================================================================
+
+names(agg_data)
+names(agg_data_tidy)
+
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    n_blocks = length(farm_id),
+    farm_area_tot = sum(AB_AREA),
+    farm_area_avg = mean(AB_AREA),
+    farm_area_med = median(AB_AREA),
+    farm_area_min = min(AB_AREA),
+    farm_area_max = max(AB_AREA),
+    across(contains("_nos"),sum),
+    across(contains("_ha"),sum))
+
+
+
+
+agg_data_tidy_SBR_w_ems = agg_data_tidy_SBR %>% 
+  calc_livestock_emissions()
+
+
+agg_data_tidy_SBR_w_ems_ffn = paste0(datadir, "agg_data_tidy_SBR_w_ems.RDS")
+saveRDS(agg_data_tidy_SBR_w_ems,agg_data_tidy_SBR_w_ems_ffn)
+
+
+
+agg_data_tidy_SBR_w_ems %>% names()
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+```
+
+
+
+
+## Table 22 TAxABxGT
+
+```{r}
+
+layer_name = "TAxABxGT"
+
+agg_layer_name_dn= paste0(datadir_rev,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+#get total area
+agg_data %>% summarise(POLY_AREA = sum(POLY_AREA))
+
+#get total area
+agg_data %>% group_by(TA) %>% summarise(POLY_AREA = sum(POLY_AREA))
+
+
+#find number rows
+agg_data %>% nrow()   # 44824
+
+#find number unique ids
+agg_data %>% pull(farm_id ) %>% unique() %>% length() # 8149
+agg_data %>% pull(AB_UID ) %>% unique() %>% length()  # 8149
+
+#get dup data
+agg_data_dup = agg_data %>% group_by(AB_UID) %>% filter(n()>1)
+
+#find number duplicates
+agg_data_dup %>% nrow() # 41364
+
+#create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+ID_TA_key = agg_data %>% 
+  group_by(AB_UID) %>% 
+  slice(which.max(POLY_AREA)) %>% 
+  dplyr::select(AB_UID, TA)
+
+# update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+agg_data = agg_data %>% 
+  rename(TA_OLD = TA) %>% 
+  left_join(ID_TA_key, by = "AB_UID")
+
+# tidy the data - removing duplicates and summing areas of the POLY_AREA field
+agg_data_tidy = agg_data %>% 
+  group_by(AB_UID) %>% 
+  summarise(across(farm_id :AB_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+
+names(agg_data)
+names(agg_data_tidy)
+
+
+
+#===========================================================================
+#===========================================================================
+# CALCULATE EMISSIONS FOR GT HERE ---
+#===========================================================================
+#===========================================================================
+
+TAxABxGT_tidy_w_ems = agg_data_tidy %>% 
+  calc_livestock_emissions()
+
+TAxABxGT_tidy_w_ems_ffn = paste0(datadir, "TAxABxGT_tidy_w_ems.RDS")
+saveRDS(TAxABxGT_tidy_w_ems,TAxABxGT_tidy_w_ems_ffn)
+
+#===========================================================================
+#===========================================================================
+# EMISSIONS ARE SUMMARISED IN LP0012_mainline_rev ----
+#===========================================================================
+#===========================================================================
+
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    n_blocks = length(farm_id),
+    farm_area_tot = sum(AB_AREA),
+    farm_area_avg = mean(AB_AREA),
+    farm_area_med = median(AB_AREA),
+    farm_area_min = min(AB_AREA),
+    farm_area_max = max(AB_AREA),
+    across(contains("_nos"),sum),
+    across(contains("_ha"),sum))
+
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+```
+
+
+
+
+## Table 23 TA_NCLxPLP_gt_1haxFC
+
+```{r}
+
+layer_name = "TA_NCLxPLP_gt_1haxFC"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+agg_data = readRDS(agg_layer_name_ffn)
+
+
+#grab the PLP_LO_key
+PLP_LO_key =PLP_LO_TA_key %>% dplyr::select(PLP_UID,LO)
+PLP_LO_key_fn ="PLP_LO_key.RDS"
+PLP_LO_key_ffn = paste0(datadir,PLP_LO_key_fn)
+PLP_LO_key = readRDS(PLP_LO_key_ffn)
+
+agg_data_mdf = agg_data %>% 
+  left_join(PLP_LO_key, by = "PLP_UID")
+
+#make table of national statistics
+TA_NCLxPLP_gt_1haxFC_nat_stats = agg_data_mdf %>% 
+  group_by(DESTOCK_YR) %>% 
+  summarise(POLY_AREA = sum(POLY_AREA))
+
+TA_NCLxPLP_gt_1haxFC_nat_stats_ffn = paste0(datadir, "TA_NCLxPLP_gt_1haxFC_nat_stats.RDS")
+saveRDS(TA_NCLxPLP_gt_1haxFC_nat_stats, TA_NCLxPLP_gt_1haxFC_nat_stats_ffn)
+
+
+#make table of TA/LO statistics
+TA_NCLxPLP_gt_1haxFC_TA_LO_stats = agg_data_mdf %>% 
+  filter(NAC==0) %>% 
+  group_by(TA, LO, DESTOCK_YR) %>% 
+  summarise(POLY_AREA = sum(POLY_AREA))
+
+
+
+
+
+
+# OHE_NCLxPLP_gt_1haxFC_TA_LO_stats_filt = agg_data_mdf %>% 
+#   filter(NAC==0) %>% 
+#   group_by(TA, LO, DESTOCK_YR) %>% 
+#   summarise(POLY_AREA = sum(POLY_AREA))
+
+
+TA_NCLxPLP_gt_1haxFC_TA_LO_stats_ffn = paste0(datadir, "TA_NCLxPLP_gt_1haxFC_TA_LO_stats.RDS")
+saveRDS(TA_NCLxPLP_gt_1haxFC_TA_LO_stats, TA_NCLxPLP_gt_1haxFC_TA_LO_stats_ffn)
+
+TA_NCLxPLP_gt_1haxFC_TA_LO_stats_csv_ffn = paste0(datadir, "TA_NCLxPLP_gt_1haxFC_TA_LO_stats.csv")
+write_csv(TA_NCLxPLP_gt_1haxFC_TA_LO_stats, TA_NCLxPLP_gt_1haxFC_TA_LO_stats_csv_ffn)
+
+TA_NCLxPLP_gt_1haxFC_TA_LO_stats_2016 = TA_NCLxPLP_gt_1haxFC_TA_LO_stats %>% 
+  ungroup() %>% 
+  filter(DESTOCK==2016) %>% 
+  mutate(LUCID_BEFORE_LO = paste0("LUCID_",LUCID_BEFORE,"_", LO)) %>% 
+  dplyr::select(TA, LUCID_BEFORE_LO, POLY_AREA) %>% 
+  spread(LUCID_BEFORE_LO,POLY_AREA) %>% 
+  mutate(across(contains("LUCID"), replace_na,0))
+
+TA_NCLxPLP_gt_1haxFC_TA_LO_stats_2016_csv_ffn = paste0(datadir,"TA_NCLxPLP_gt_1haxFC_TA_LO_stats_2016.csv") 
+write_csv(TA_NCLxPLP_gt_1haxFC_TA_LO_stats_2016, TA_NCLxPLP_gt_1haxFC_TA_LO_stats_2016_csv_ffn)
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(TA_NCLxPLP_gt_1haxFC_TA_LO_stats,spreadsheet_ffn,sheetname = "ForestClearance2",rowStart = 4,colStart = 4)
+
+
+
+
+```
+
+
+
+## Table 27 TAxPLPxAB
+
+Even though it is not in the name the PLP is the NCL version of properties over 1ha
+The Agribase is also the >1ha version
+
+# THIS CODE NOW IS THE DEFINITIVE METHOD FOR CALCULATING GHG EMISSIONS (AS OF 6/6/22)
+# THIS SNIPPET HAS BEEN COPIED TO LP0012_MAINLINE_REV.RMD AND RELABELLED LIVESTOCK EMISSIONS
+
+
+```{r Table 27}
+layer_name = "TAxPLPxAB"
+
+agg_layer_name_dn= paste0(datadir_rev,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+TAxPLPxAB = readRDS(agg_layer_name_ffn)
+
+TAxPLPxAB %>% names()
+# There are 970,730 rows
+
+# TAxPLPxAB_w_EMS = TAxPLPxAB %>% calc_livestock_emissions()
+
+
+# This code takes a couple of minutes so we don't want to run it every time
+
+re_calc_avg_animal_numbers_per_PLP = F
+
+if (re_calc_avg_animal_numbers_per_PLP){
+  
+  TAxPLPxAB_mdf1 = TAxPLPxAB %>% 
+    #calculate the animals per area of agribase polygon
+    mutate(across(contains("nos"), ~ .x / AB_AREA)) %>% 
+    # average the animals per ha for each property
+    group_by(PLP_UID) %>% 
+    summarise(
+      id = first(id), 
+      PLP_AREA = first(PLP_AREA), 
+      farm_id_list = list(farm_id), 
+      AB_UID_list = list(AB_UID), 
+      AB_AREA = mean(AB_AREA),
+      POLY_AREA = sum(POLY_AREA),
+      across(contains("nos"), mean))
+  
+  TAxPLPxAB_mdf1 = TAxPLPxAB_mdf1 %>% 
+    filter(POLY_AREA>1)
+  
+  
+  # TAxPLPxAB_mdf1 %>% pull(PLP_AREA) %>% sum() #13505530
+  # TAxPLPxAB_mdf2 %>% pull(PLP_AREA) %>% sum()
+  # TAxPLPxAB_mdf1 %>% pull(POLY_AREA) %>% sum()
+  # 
+  
+  TAxPLPxAB_mdf1_ffn = paste0(datadir_rev, "TAxPLPxAB_mdf1.RDS")
+  saveRDS(TAxPLPxAB_mdf1, TAxPLPxAB_mdf1_ffn)
+  
+}else{
+  
+  TAxPLPxAB_mdf1_ffn = paste0(datadir_rev, "TAxPLPxAB_mdf1.RDS")
+  TAxPLPxAB_mdf1 = readRDS(TAxPLPxAB_mdf1_ffn)
+  
+}
+
+# The code below also takes a couple of minutes so we don't want to run it every time
+# the animal numbers that entered the calc_livestock_emissions were on a per ha basis
+# therefore the emissions returned will be on a per ha basis
+# so when we aggregate them nationally we will have to create a weighted average
+
+
+recalc_TAxPLPxAB_mdf1_w_EMS = F
+
+if (recalc_TAxPLPxAB_mdf1_w_EMS){
+  
+  TAxPLPxAB_mdf1_w_EMS = TAxPLPxAB_mdf1 %>% 
+    calc_livestock_emissions()
+  
+  beep("fanfare")  
+  
+  TAxPLPxAB_mdf1_w_EMS_ffn = paste0(datadir_rev, "TAxPLPxAB_mdf1_w_EMS.RDS")
+  saveRDS(TAxPLPxAB_mdf1_w_EMS,TAxPLPxAB_mdf1_w_EMS_ffn)
+  
+}else{
+  
+  TAxPLPxAB_mdf1_w_EMS_ffn = paste0(datadir_rev, "TAxPLPxAB_mdf1_w_EMS.RDS")
+  TAxPLPxAB_mdf1_w_EMS = readRDS(TAxPLPxAB_mdf1_w_EMS_ffn)
+  
+}
+
+# names(TAxPLPxAB_mdf1_w_EMS)
+#bring in the newly created keys created in chunk "Create Keys" at bottom of this script
+
+# AB_TA_LO_key_ffn = paste0(datadir_rev, "AB_TA_LO_key.RDS")
+# AB_TA_LO_key = saveRDS(AB_TA_LO_key)
+
+
+PLP_TA_LO_key_ffn = paste0(datadir_rev,"PLP_TA_LO_key.RDS")
+PLP_TA_LO_key = readRDS(PLP_TA_LO_key_ffn)
+
+PLP_TA_LO_key_sel = PLP_TA_LO_key %>% dplyr::select(id,TA,LO)
+
+TAxPLPxAB_mdf1_w_EMS_w_ROLO = TAxPLPxAB_mdf1_w_EMS %>%
+  left_join(PLP_TA_LO_key_sel, by = "id" )
+
+PLP_TA_LO_key %>% filter(LO=="ML") %>% pull(POLY_AREA) %>% sum() # total amount of Maori Land, 1,355 kha
+
+TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% pull(PLP_AREA) %>% sum()/1e3   # total area of PLP = 13,918 kha
+TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% pull(POLY_AREA) %>% sum()/1e3   # total area of PLPxAB polygons = 13,717 kha
+
+TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% filter(LO == "ML") %>% pull(PLP_AREA) %>% sum()/1e3# total area of PLP on ML = 946 kha
+TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% filter(LO == "GT") %>% pull(PLP_AREA) %>% sum()/1e3# total area of PLP on GT = 12,972 kha
+
+TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% filter(LO == "ML") %>% pull(POLY_AREA) %>% sum()/1e3# total area of PLPxAB polygons = 1,032 kha
+TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% filter(LO == "GT") %>% pull(POLY_AREA) %>% sum()/1e3# total area of PLPxAB polygons = 12,685 kha
+
+
+
+animal_abbr = paste0(c("dai","bef","shp","dee","pigs","goat","dai","cam","donk","pou"),"_nos")
+
+TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% names()
+
+#Take average at each property
+
+TAxPLPxAB_mdf1_w_EMS_w_ROLO_mdf1 = TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% 
+  dplyr::select(TA, LO,id, PLP_UID, farm_id_list, contains("AREA"),PLP_AREA,animal_abbr, contains("EMS")) %>% 
+  ungroup() %>% 
+  group_by(id) %>% 
+  summarise(
+    POLY_AREA = sum(POLY_AREA),
+    PLP_AREA = first(PLP_AREA),
+    TA = first(TA), LO = first(LO),
+    GHG_EMS_AGG_PER_HA  = mean(GHG_EMS_TOT),
+    GHG_EMS_AGG_PER_PROPERTY = GHG_EMS_AGG_PER_HA * PLP_AREA,
+    across(contains("nos"), mean),
+    across(contains("EMS_TOT"), mean))
+
+TAxPLPxAB_mdf1_w_EMS_w_ROLO_mdf1 %>% dplyr::select(  GHG_EMS_AGG_PER_HA,     GHG_EMS_TOT)
+
+
+#WRONG! SHOULD NOT USE WTD AVERAGES FOR AREA-SPECIFIC EMISSIONS!
+# TAxPLPxAB_mdf1_w_EMS_TA_LO_wtd = TAxPLPxAB_mdf1_w_EMS_w_ROLO_mdf1 %>% 
+#   ungroup() %>% 
+#   group_by(TA, LO) %>% 
+#   mutate(
+#     frac_PLP_AREA = PLP_AREA/sum(PLP_AREA),
+#     GHG_EMS_AGG_PER_HA_wtd = GHG_EMS_AGG_PER_HA * frac_PLP_AREA,
+#     across(contains("nos"), ~ .x * frac_PLP_AREA),
+#     across(contains("EMS_TOT"), ~ .x * frac_PLP_AREA)
+#   )
+# 
+# 
+# TAxPLPxAB_mdf1_w_EMS_TA_LO_wtd %>% select(  GHG_EMS_AGG_PER_HA_wtd,     GHG_EMS_TOT)
+# 
+# 
+# TAxPLPxAB_mdf1_w_EMS_TA_LO_wtd_avg = TAxPLPxAB_mdf1_w_EMS_TA_LO_wtd %>% 
+#   summarise(
+#     frac_PLP_AREA_sum = sum(frac_PLP_AREA),
+#     POLY_AREA = sum(POLY_AREA),
+#     PLP_AREA = sum(PLP_AREA),
+#     GHG_EMS_AGG_PER_HA_wtd_avg = sum(GHG_EMS_AGG_PER_HA_wtd),
+#     across(contains("nos"), sum),
+#     across(contains("EMS_TOT"), sum),
+#     GHG_EMS_AGG_OVER_TA = sum(GHG_EMS_AGG_PER_PROPERTY),
+#     GHG_EMS_AGG_OVER_TA_CHK = GHG_EMS_AGG_PER_HA_wtd_avg * PLP_AREA) %>% 
+#   tidy_df_for_plot()
+
+# NOW CORRECTED
+
+#Take average of property averages across TA
+
+TAxPLPxAB_mdf1_w_EMS_TA_LO_stats = TAxPLPxAB_mdf1_w_EMS_w_ROLO_mdf1 %>%
+  ungroup() %>%
+  group_by(TA, LO) %>%
+  summarise(
+    nprops = length(id),
+    POLY_AREA = sum(POLY_AREA),
+    PLP_AREA = sum(PLP_AREA),
+    across(contains("nos"), mean),
+    across(contains("EMS_TOT"), mean),
+    GHG_EMS_AGG_OVER_TA = mean(GHG_EMS_AGG_PER_HA)) %>%
+  tidy_df_for_plot()
+
+
+
+TAxPLPxAB_mdf1_w_EMS_LO_stats = TAxPLPxAB_mdf1_w_EMS_TA_LO_stats %>% 
+  ungroup() %>% 
+  group_by(LO) %>% 
+  summarise(
+    GHG_EMS_TOT_PER_HA = mean(GHG_EMS_TOT ),
+    PLP_AREA_TOTAL = sum(PLP_AREA),
+    POLY_AREA_TOTAL = sum(POLY_AREA)) %>%
+  mutate(
+    GHG_EMS_TOT_PLP_BASIS = GHG_EMS_TOT_PER_HA * PLP_AREA_TOTAL/1e3,
+    GHG_EMS_TOT_PLPxAB_BASIS = GHG_EMS_TOT_PER_HA * POLY_AREA_TOTAL/1e3)
+
+
+
+
+TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% names()
+#get total area
+TAxPLPxAB_mdf1_w_EMS_w_ROLO %>% ungroup() %>% summarise(POLY_AREA = sum(POLY_AREA))
+
+
+
+TA_AREAS_ML_AND_GT_ffn = "D:/LUCA Team/Land Use Capability Assessments Limited/LUCA team site - Documents/LUCA-A/Projects/2021-04-11-LP0012-BERL-GHGMaoriLand/data/rev/final_tables/TA_AREAS_ML_AND_GT.RDS"
+
+
+TA_AREAS = readRDS(TA_AREAS_ML_AND_GT_ffn) %>% rename(TA_AREA = POLY_AREA)
+
+TAxPLPxAB_mdf1_w_EMS_TA_LO_stats_mdf = TAxPLPxAB_mdf1_w_EMS_TA_LO_stats %>% 
+  left_join(TA_AREAS, on = c("TA","LO")) 
+
+
+AG_EMISSIONS_FINAL_UNEXTRAP = TAxPLPxAB_mdf1_w_EMS_TA_LO_stats_mdf 
+
+
+AG_EMISSIONS_FINAL_UNEXTRAP %>% 
+  group_by(TA,LO) %>% 
+  dplyr::select(nprops, POLY_AREA,PLP_AREA, contains("nos"), contains("EMS")) %>% 
+  mutate(GHG_EMS_TOT_TOT = GHG_EMS_TOT * PLP_AREA) %>% 
+  ungroup() %>% 
+  group_by(LO) %>% 
+  summarise(GHG_EMS_TOT_TOT = sum(GHG_EMS_TOT_TOT)) 
+
+# 2603997/(2603997 + 41124038)
+
+AG_EMISSIONS_FINAL_UNEXTRAP$dai_nos[1] *AG_EMISSIONS_FINAL_UNEXTRAP$PLP_AREA[1]
+
+# TAxPLPxAB_mdf1_w_EMS_TA_LO_mdf %>% group_by(LO) %>% 
+#   mutate(
+#     frac_PLP_AREA = PLP_AREA/sum(PLP_AREA),
+#     GHG_EMS_AGG_PER_HA_wtd_PLP_basis = frac_PLP_AREA * GHG_EMS_AGG_PER_HA_wtd_avg,
+#     frac_TA_AREA = TA_AREA/sum(TA_AREA),
+#     GHG_EMS_AGG_PER_HA_wtd_TA_basis = frac_TA_AREA * GHG_EMS_AGG_PER_HA_wtd_avg) %>% 
+#   summarise(
+#     frac_PLP_AREA_sum = sum(frac_PLP_AREA),
+#     GHG_EMS_AGG_PER_HA_wtd_avg_PLP_basis = sum(GHG_EMS_AGG_PER_HA_wtd_PLP_basis),
+#     frac_TA_AREA_sum = sum(frac_TA_AREA),
+#     GHG_EMS_AGG_PER_HA_wtd_avg_TA_basis = sum(GHG_EMS_AGG_PER_HA_wtd_TA_basis),
+#   )
+```
+
+#|||||||||||||||||||||||||||||||||||||||||||||||||||
+#Export of Ag Emissions
+#|||||||||||||||||||||||||||||||||||||||||||||||||||
+
+# THIS SNIPPET HAS BEEN COPIED TO LP0012_MAINLINE_REV.RMD AND RELABELLED LIVESTOCK EMISSIONS (6/6/22)
+
+
+```{r Emissions Export}
+
+
+AG_EMISSIONS_FINAL_UNEXTRAP_ffn = paste0(datadir_rev,"AG_EMISSIONS_FINAL_UNEXTRAP.RDS")
+saveRDS(AG_EMISSIONS_FINAL_UNEXTRAP,AG_EMISSIONS_FINAL_UNEXTRAP_ffn)
+
+
+
+AG_EMISSIONS_FINAL_UNEXTRAP_csv_ffn = paste0(datadir_rev,"AG_EMISSIONS_FINAL_UNEXTRAP.csv")
+write_csv(AG_EMISSIONS_FINAL_UNEXTRAP,AG_EMISSIONS_FINAL_UNEXTRAP_csv_ffn)
+
+copen(AG_EMISSIONS_FINAL_UNEXTRAP_csv_ffn)
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+```{r Emissions Export}
+TAxPLPxAB_mdf1_w_EMS_w_ROLO
+
+# #get total area
+# agg_data %>% group_by(TA) %>% summarise(POLY_AREA = sum(POLY_AREA))
+# 
+# 
+# #find number rows
+# agg_data %>% nrow()   # 44824
+# 
+# #find number unique ids
+# agg_data %>% pull(farm_id ) %>% unique() %>% length() # 8149
+# agg_data %>% pull(AB_UID ) %>% unique() %>% length()  # 8149
+# 
+# #get dup data
+# agg_data_dup = agg_data %>% group_by(AB_UID) %>% filter(n()>1)
+# 
+# #find number duplicates
+# agg_data_dup %>% nrow() # 41364
+# 
+# #create a key to assign a LUM to the TA in which the biggest portion of the LUM lies
+# ID_TA_key = agg_data %>% 
+#   group_by(AB_UID) %>% 
+#   slice(which.max(POLY_AREA)) %>% 
+#   dplyr::select(AB_UID, TA)
+# 
+# # update the TA to reflect this correction (and save the old TA assignation to "TA_OLD")
+# agg_data = agg_data %>% 
+#   rename(TA_OLD = TA) %>% 
+#   left_join(ID_TA_key, by = "AB_UID")
+# 
+# # tidy the data - removing duplicates and summing areas of the POLY_AREA field
+# agg_data_tidy = agg_data %>% 
+#   group_by(AB_UID) %>% 
+#   summarise(across(farm_id :AB_AREA, first),POLY_AREA =sum(POLY_AREA), TA = first(TA) )
+# 
+# names(agg_data)
+# names(agg_data_tidy)
+# 
+
+
+#===========================================================================
+#===========================================================================
+# CALCULATE EMISSIONS FOR GT HERE ---
+#===========================================================================
+#===========================================================================
+
+TAxABxGT_tidy_w_ems = agg_data_tidy %>% 
+  calc_livestock_emissions()
+
+TAxABxGT_tidy_w_ems_ffn = paste0(datadir, "TAxABxGT_tidy_w_ems.RDS")
+saveRDS(TAxABxGT_tidy_w_ems,TAxABxGT_tidy_w_ems_ffn)
+
+#===========================================================================
+#===========================================================================
+# EMISSIONS ARE SUMMARISED IN LP0012_mainline_rev ----
+#===========================================================================
+#===========================================================================
+
+
+# aggregate to TA level
+agg_data_tidy_SBR = agg_data_tidy %>% 
+  group_by(TA) %>% 
+  summarise(
+    n_blocks = length(farm_id),
+    farm_area_tot = sum(AB_AREA),
+    farm_area_avg = mean(AB_AREA),
+    farm_area_med = median(AB_AREA),
+    farm_area_min = min(AB_AREA),
+    farm_area_max = max(AB_AREA),
+    across(contains("_nos"),sum),
+    across(contains("_ha"),sum))
+
+
+# write to spredsheet
+
+spreadsheet_fn = "MaoriLandEmissions_Tables.xlsx"
+spreadsheet_dn = datadir
+spreadsheet_ffn = paste0(spreadsheet_dn,spreadsheet_fn)
+
+luca_write_xls(agg_data_tidy_SBR,spreadsheet_ffn,sheetname = layer_name,rowStart = 4,colStart = 4)
+
+
+
+```
+
+# get PLP_LO_key
+
+```{r}
+
+
+TA_NCLxPLP_gt_1haxML_fn = "TA_NCLxPLP_gt_1haxML.RDS"
+TA_NCLxPLP_gt_1haxML_dn = paste0(datadir,"nat_agg_data_sets/")
+TA_NCLxPLP_gt_1haxML_ffn = paste0(TA_NCLxPLP_gt_1haxML_dn, TA_NCLxPLP_gt_1haxML_fn)
+TA_NCLxPLP_gt_1haxML = readRDS(TA_NCLxPLP_gt_1haxML_ffn)
+
+TA_NCLxPLP_gt_1haxGT_fn = "TA_NCLxPLP_gt_1haxGT.RDS"
+TA_NCLxPLP_gt_1haxGT_dn = paste0(datadir,"nat_agg_data_sets/")
+TA_NCLxPLP_gt_1haxGT_ffn = paste0(TA_NCLxPLP_gt_1haxGT_dn, TA_NCLxPLP_gt_1haxGT_fn)
+TA_NCLxPLP_gt_1haxGT = readRDS(TA_NCLxPLP_gt_1haxGT_ffn)
+
+TA_NCLxPLP_gt_1haxML_and_GT = TA_NCLxPLP_gt_1haxML %>% 
+  mutate(LO = "ML") %>% 
+  bind_rows(TA_NCLxPLP_gt_1haxGT %>% mutate(LO="GT"))
+
+
+
+#find out how many unique property IDs
+TA_NCLxPLP_gt_1haxML_and_GT %>% pull(PLP_UID) %>% unique() %>% length()
+
+
+#remove duplicates keeping only the properties where the polygon area is highest.
+PLP_LO_TA_key  = TA_NCLxPLP_gt_1haxML_and_GT %>% 
+  dplyr::select(id, PLP_UID, PLP_AREA, TA, LO, POLY_AREA) %>% 
+  group_by(PLP_UID ) %>% 
+  slice(which.max(POLY_AREA))
+
+# @save for later use
+
+PLP_LO_TA_key_fn ="PLP_LO_TA_key.RDS"
+PLP_LO_TA_key_ffn = paste0(datadir,PLP_LO_TA_key_fn)
+saveRDS(PLP_LO_TA_key,PLP_LO_TA_key_ffn)
+
+PLP_LO_key =PLP_LO_TA_key %>% dplyr::select(PLP_UID,LO)
+PLP_LO_key_fn ="PLP_LO_key.RDS"
+PLP_LO_key_ffn = paste0(datadir,PLP_LO_key_fn)
+saveRDS(PLP_LO_key,PLP_LO_key_ffn)
+
+
+PLP_LO_TA_key %>% ungroup() %>% filter(LO=="ML") %>% summarise(POLY_AREA = sum(POLY_AREA))
+PLP_LO_TA_key %>% ungroup() %>% filter(LO=="GT") %>% summarise(POLY_AREA = sum(POLY_AREA))
+
+PLP_LO_TA_key %>% ungroup() %>% filter(LO=="ML") %>% summarise(PLP_AREA = sum(PLP_AREA, na.rm=T))
+PLP_LO_TA_key %>% ungroup() %>% filter(LO=="GT") %>% summarise(PLP_AREA = sum(PLP_AREA, na.rm=T))
+
+
+```
+
+
+
+
+
+
+# Test on PLP interference
+
+We need to test whether the intersection TAxLUM gives the same results as TAxPLPxLUM
+
+
+```{r}
+
+dst_dn = paste0(datadir,"Intersection_Tests/")
+# dir.create(dst_dn)
+
+TA_NCL_dn = paste0(TA_parent_folder,"Tairawhiti/")
+TA_NCL_fn  = "TA_NCL.gpkg"
+TA_NCL_ffn = paste0(TA_NCL_dn, TA_NCL_fn)
+TA_NCL = st_read(TA_NCL_ffn)
+
+TA_NCLxLUM_dn = paste0(TA_parent_folder,"Tairawhiti/")
+TA_NCLxLUM_fn  = "TA_NCLxLUM.gpkg"
+TA_NCLxLUM_ffn = paste0(TA_NCLxLUM_dn, TA_NCLxLUM_fn)
+TA_NCLxLUM = st_read(TA_NCLxLUM_ffn)
+
+redo_ixn = F
+
+if (redo_ixn){
+  PLP = luca_load("PLP")
+  
+  TA_NCLxPLP = luca_intersection(P1 =PLP ,P2 = TA_NCL, PC =Current_PC, ffn_stub = 'TA_NCLxPLP', dn = dst_dn, val = "both", parallel = T, ncore = 15, filetype = "SHP") 
+}
+
+#read the new layer 
+TA_NCLxPLP_ffn = paste0(dst_dn, "TA_NCLxPLP.shp")
+TA_NCLxPLP = st_read(TA_NCLxPLP_ffn)
+
+#intersect the new layer with LUM
+LUM = luca_load("LUM")
+TA_NCLxPLPxLUM = luca_intersection(P1 =TA_NCLxPLP ,P2 = LUM, PC =Current_PC, ffn_stub = 'TA_NCLxPLPxLUM', dn = dst_dn, val = "both", parallel = T, ncore = 15, filetype = "SHP") 
+
+#create another version of this, this time using data that has already been intersected with the TA
+TA_NCLxPLPxLUM_2 = luca_intersection(P1 =TA_NCLxPLP ,P2 = TA_NCLxLUM, PC =Current_PC, ffn_stub = 'TA_NCLxPLPxLUM_2', dn = dst_dn, val = "both", parallel = T, ncore = 15, filetype = "SHP") 
+
+#look at teh effect of combining the data
+TA_NCLxPLP_cmb = st_combine(TA_NCLxPLP) %>% st_collection_extract("POLYGON")
+
+mapview(TA_NCLxPLP_cmb)
+
+TA_NCLxPLPxLUM_3 = luca_intersection(P1 =TA_NCLxLUM ,P2 = TA_NCLxPLP_cmb, PC =Current_PC, ffn_stub = 'TA_NCLxPLPxLUM_3', dn = dst_dn, val = "both", parallel = T, ncore = 15, filetype = "SHP") 
+
+calc_tot_area(TA_NCL)
+
+# nfeat
+TA_NCLxLUM %>% nrow()
+TA_NCLxPLPxLUM %>% nrow()
+TA_NCLxPLPxLUM_2 %>% nrow()
+
+#total area
+TA_NCLxLUM %>% calc_tot_area()
+TA_NCLxPLPxLUM %>% calc_tot_area()
+TA_NCLxPLPxLUM_2 %>% calc_tot_area()
+
+#area of LUCID 2016 = 71
+TA_NCLxLUM %>% filter(LUCID_2016==71) %>% calc_tot_area()
+TA_NCLxPLPxLUM %>% filter(LUCID_2016==71) %>% calc_tot_area()
+TA_NCLxPLPxLUM_2 %>% filter(LUCID_2016==71) %>% calc_tot_area()
+
+
+TA_NCLxML_gt_1ha_dn = paste0(TA_parent_folder,"Tairawhiti/")
+TA_NCLxML_gt_1ha_fn  = "TA_NCLxML_gt_1ha.gpkg"
+TA_NCLxML_gt_1ha_ffn = paste0(TA_NCLxML_gt_1ha_dn, TA_NCLxML_gt_1ha_fn)
+TA_NCLxML_gt_1ha = st_read(TA_NCLxML_gt_1ha_ffn)
+
+TA_NCLxML_gt_1ha_cmb = st_combine(TA_NCLxML_gt_1ha)
+
+TA_NCLxML_gt_1ha %>% calc_tot_area()
+TA_NCLxML_gt_1ha_cmb %>% st_area(.)/1e4 %>% as.numeric()
+
+mapview(TA_NCLxML_gt_1ha_cmb)
+
+
+TA_NCLxMLxLUM_1 = luca_intersection(P1 =TA_NCLxLUM ,P2 = TA_NCLxML_gt_1ha, PC =Current_PC, ffn_stub = 'TA_NCLxMLxLUM_1', dn = dst_dn, val = "both", parallel = T, ncore = 15, filetype = "SHP") 
+
+
+TA_NCLxML_gt_1ha_cmb %>% st_collection_extract("POLYGON")
+
+TA_NCLxMLxLUM_2 = luca_intersection(P1 =TA_NCLxLUM ,P2 = TA_NCLxML_gt_1ha_cmb, PC =Current_PC, ffn_stub = 'TA_NCLxMLxLUM_1', dn = dst_dn, val = "both", parallel = T, ncore = 15, filetype = "SHP") 
+
+
+#now look to see whether we can remove overlapping polygons on ML
+
+
+
+TA_NCLxML_gt_1ha %>% calc_tot_area()
+
+
+TA_NCLxML_gt_1ha_nol = TA_NCLxML_gt_1ha %>% 
+  group_by(BLOCK_ID) %>% 
+  summarise(geom = st_combine(geom)) %>% 
+  st_cast("POLYGON") %>% 
+  ungroup() %>% 
+  st_union()
+
+TA_NCLxML_gt_1ha_nol %>% st_area(.)/1e4 %>% as.numeric()
+
+mapview(TA_NCLxML_gt_1ha_nol)
+
+
+```
+
+
+# view maps
+
+
+```{r}
+
+TA_parent_folder = paste0(datadir,"TA_level_data_sets/")
+TA = luca_load("TA")
+TA_names = TA %>% pull(TA) %>% unique()
+TA_ix_to_proc =1:length(TA_names)
+iTA = 11
+curr_TA_ix = TA_ix_to_proc[iTA]
+TA_name_curr = TA_names[curr_TA_ix]
+TA_folder_curr = paste0(TA_parent_folder, TA_name_curr,'/')
+TA_plotdir = paste0(plotdir, TA_name_curr,"/")
+
+
+layer_names = c(
+  "TAxCL.gpkg",  # task 1
+  "TAxPA.gpkg",  # task 2
+  "TAxPLP_CL.gpkg",  # task 3
+  "TAxPO_CL.gpkg",  # task 4
+  "TA_MINUS_CL_01.gpkg",  # task 5
+  "TA_MINUS_CL_02.gpkg",  # task 6
+  "TA_MINUS_CL_03.gpkg",  # task 7
+  "TA_MINUS_CL_04.gpkg",  # task 8
+  "TA_NCLxPLP_gt_1ha",  # task 9
+  "TA_NCLxML_gt_1ha",  # task 10
+  "TA_NCLxLUM",  # task 11
+  "AB_LP0012_gt_1ha.gpkg",  # task 12
+  "TA_NCLxML",  # task 13
+  "NCLxMLxLUM",  # task 14
+  "TA_NCLxPLP_gt_1haxGT",  # task 15
+  "TA_NCLxPLP_gt_1haxML",  # task 16
+  "TA_NLCxPLPxMLxLUM",  # task 17
+  "TA_NLCxPLPxGTxLUM",  # task 18
+  "XX"  # task 19
+  
+)
+
+
+layer_sel = 6
+layer_name_curr = layer_names[layer_sel]
+
+ffn = paste0(TA_folder_curr, layer_name_curr)
+
+ffn_exists = file.exists(ffn)
+
+
+
+
+if (ffn_exists){
+  print(paste("File", ffn, "exists...will now plot map"))
+  Layer = st_read(ffn)
+  mapview(Layer)
+}else{
+  print(paste("Could not find file", ffn))
+}
+
+
+
+```
+
+
+#Analysis of ML for figure 2
+
+```{r}
+
+
+
+
+
+
+
+
+```
+
+
+#Create keys
+
+## AB_TA key
+
+```{r create keys}
+####################################################################################
+
+AB = luca_load("AB")
+TA = luca_load("TA")
+
+AB %>% calc_tot_area()
+
+AB_cmb = st_combine(AB)
+AB_cmb %>% mutate(as.numeric(st_area(.))/1e4)
+
+gc()
+ABxTA =  luca_intersection(P1 =AB ,P2 = TA, PC =Current_PC, ffn_stub = 'TAxAB', dn = datadir, val = "both", parallel = T, ncore = 15) 
+
+
+ABxTA_mdf = ABxTA %>% 
+  mutate(
+    ABxTA_UID = 1:nrow(.),
+    ABxTA_AREA = as.numeric(st_area(.))/1e4)
+
+#over write the file with UID and AREA added
+st_write(ABxROBE_mdf, paste0(datadir, 'TAxAB.gpkg'), append = F)
+
+#-----------------------------------------------------------------------------------
+```
+
+
+## ML_TA key
+
+```{r create keys}
+gc()
+ML = luca_load("ML")
+
+# intersext ABxTA with ML
+MLxTA =  luca_intersection(P1 =ML ,P2 = TA, PC =Current_PC, ffn_stub = 'TAxML', dn = datadir, val = "both", parallel = T, ncore = 15) 
+
+MLxTA_mdf = MLxTA %>% 
+  mutate(
+    MLxTA_UID = 1:nrow(.),
+    MLxTA_AREA = as.numeric(st_area(.))/1e4)
+
+st_write(MLxTA_mdf, paste0(datadir, 'TAxML.gpkg'), append = F)
+
+#-----------------------------------------------------------------------------------
+```
+
+## AB_TA_LO key
+
+
+```{r create keys}
+ABxTAxML =  luca_intersection(P1 =ABxTA_mdf ,P2 = ML, PC =Current_PC, ffn_stub = 'ABxTAxML', dn = datadir, val = "both", parallel = T, ncore = 15) 
+
+#-----------------------------------------------------------------------------------
+
+ABxTAxML = st_read(paste0(datadir, "ABxTAxML.gpkg"))
+
+
+AB_TA_ML_ng = ABxTAxML %>% 
+  mutate(
+    ABxTAxML_UID = 1:nrow(.),
+    ABxTAxML_UID = as.numeric(st_area(.))/1e4) %>% 
+  st_set_geometry(NULL) %>% 
+  as_tibble()
+
+AB_TA_ML_key = ABxTAxML_ng %>% 
+  group_by(farm_id) %>% 
+  slice(which.max(ABxTA_AREA)) %>% 
+  select(farm_id, BLOCK_ID)
+
+
+ABxTA = st_read(paste0(datadir, "TAxAB.gpkg"))
+
+
+AB_TA_key = ABxTA %>% 
+  group_by(farm_id) %>% 
+  slice(which.max(ABxTA_AREA)) %>% 
+  st_set_geometry(NULL) %>% 
+  as_tibble() %>% 
+  select(farm_id, TA)
+
+AB_TA_LO_key = AB_TA_key %>% 
+  mutate(LO="GT") 
+
+AB_TA_LO_key$LO[which(AB_TA_LO_key$farm_id %in% ABxTAxML_key$farm_id)] = "ML"
+
+length(which(AB_TA_LO_key$LO == "ML"))
+nrow(AB_TA_ML_key)
+
+AB_TA_LO_key_ffn = paste0(datadir_rev, "AB_TA_LO_key.RDS")
+saveRDS(AB_TA_LO_key, AB_TA_LO_key_ffn)
+
+#-----------------------------------------------------------------------------------
+```
+
+
+## PLP_TA_LO key
+
+```{r create keys}
+# Create PLP_TA_LO Key
+
+
+layer_name = "TA_NCLxPLP_gt_1haxML" # created in step 16
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+
+TA_NCLxPLP_gt_1haxML = readRDS(agg_layer_name_ffn)
+
+TA_NCLxPLP_gt_1haxML_trc = TA_NCLxPLP_gt_1haxML %>% 
+  filter(POLY_AREA>1) %>% 
+  ungroup() %>% 
+  dplyr::select(id,
+                BLOCK_ID = BLOCK_I,
+                PLP_AREA = PLP_ARE,
+                POLY_AREA) %>% 
+  group_by(id) %>% 
+  summarise(
+    BLOCK_ID = list(BLOCK_ID),
+    PLP_AREA = first(PLP_AREA),
+    POLY_AREA = sum(POLY_AREA),
+    frac_ML = POLY_AREA/PLP_AREA) %>% 
+  filter(POLY_AREA > 1 & frac_ML > .25)
+
+
+
+layer_name = "TA_NCLxPLP_gt_1ha"
+
+agg_layer_name_dn= paste0(datadir_rev,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".RDS")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+TA_NCLxPLP_gt_1ha = readRDS(agg_layer_name_ffn)
+
+
+
+PLP_TA_LO_key = TA_NCLxPLP_gt_1ha %>% 
+  filter(POLY_AREA>1) %>% 
+  dplyr::select(id, TA) %>% 
+  left_join(TA_NCLxPLP_gt_1haxML_trc, by = "id") %>% 
+  mutate(LO = ifelse(is.na(frac_ML), "GT", "ML"))
+
+
+PLP_TA_LO_key %>% filter(LO=="ML") %>% nrow()
+
+PLP_TA_LO_key_ffn = paste0(datadir_rev,"PLP_TA_LO_key.RDS")
+saveRDS(PLP_TA_LO_key, PLP_TA_LO_key_ffn)
+
+
+
+
+```
+
+
+#remove overlaps in AB
+
+```{r}
+
+
+AB_TAIRA_ffn = paste0(datadir_rev, "TA_level_data_sets/Waitaha/TA_NCLxAB_LP0012_gt_1ha.gpkg")
+file.exists(AB_TAIRA_ffn)
+AB_TAIRA=st_read(AB_TAIRA_ffn)
+AB_TAIRAnol = remove_overlaps_outer_fcn(AB_TAIRA)
+
+
+AB_TAIRA_1 = mapview(AB_TAIRA)
+
+
+
+# read AB
+AB_LP0012_gt_1ha_ffn = paste0(datadir, "AB_LP0012_gt_1ha.gpkg")
+AB_LP0012_gt_1ha = st_read(AB_LP0012_gt_1ha_ffn, append = F)
+
+AB = luca_load("AB")
+
+AB_LP0012_gt_1ha = AB %>% 
+  mutate(
+    AB_UID = 1:nrow(.),
+    AB_AREA = as.numeric(st_area(.))/1e4)
+
+
+AB_LP0012_gt_1ha_nol = remove_overlaps_outer_fcn(AB_LP0012_gt_1ha)
+
+# reead the National PLP layer
+
+layer_name = "TA_NCLxPLP_gt_1ha"
+
+agg_layer_name_dn= paste0(datadir,"nat_agg_data_sets/")
+agg_layer_name_fn = paste0(layer_name,".gpkg")
+agg_layer_name_ffn = paste0(agg_layer_name_dn, agg_layer_name_fn)
+TA_NCLxPLP_gt_1ha = st_read(agg_layer_name_ffn)
+
+
+
+
+
+
+remove_overlaps_outer_fcn = function(SF_INPUT){
+  
+  nits = 1
+  
+  
+  for (i in 1:nits){
+    
+    if (i==1){
+      SF_OBJ = remove_overlaps_inner_fcn(SF_INPUT)
+    }else{
+      SF_OBJ = remove_overlaps_inner_fcn(SF_OBJ)
+    }
+    
+    
+    
+    
+  }
+  
+  
+  return(SF_OBJ)
+  
+}
+
+
+
+remove_overlaps_inner_fcn = function(SF_OBJ){
+  
+  
+  SF_OBJ_nol = SF_OBJ %>% mutate(same_size_as = 0, reduced_area_by=0)
+  
+  print("Starting buffering")
+  
+  SF_OBJ_buff = st_buffer(SF_OBJ, -20)
+  
+  print("Starting self intersection to find overlaps")
+  
+  SF_OBJ_self_ix = st_intersection(SF_OBJ_buff, tolerance =30)
+  
+  
+  SF_OBJ_self_ix_nol = SF_OBJ_self_ix %>% filter(n.overlaps <2) 
+  SF_OBJ_self_ix_ol = SF_OBJ_self_ix %>% filter(n.overlaps >1) 
+  
+  OL_LIST = SF_OBJ_self_ix_ol %>% pull(origins) %>% as.list() #%>% head()
+  # length(OL_LIST)
+  print(paste("Found", length(OL_LIST),"overlaps in layer...."))
+  
+  
+  for (oln in 1:length(OL_LIST)){
+    
+    
+    
+    # class(AB_self_ix_ol)
+    # oln = 14
+    
+    olx1 = OL_LIST[[oln]][1]
+    olx2 = OL_LIST[[oln]][2]
+    
+    shp1 = SF_OBJ[olx1,]
+    shp2 = SF_OBJ[olx2,]
+    
+    
+    A = st_intersection(shp1,shp2)
+    # mapview(A)
+    # mapview(shp1)
+    # mapview(shp2)
+    area1 = as.numeric(st_area(shp1))/1e4
+    area2 = as.numeric(st_area(shp2))/1e4
+    
+    
+    if (area1 >= area2){
+      first_is_bigger = T
+      shp_A_ix = olx1
+      shp_B_ix = olx2
+    }else{
+      first_is_bigger = F
+      shp_A_ix = olx2
+      shp_B_ix = olx1
+      
+      
+    }
+    
+    shp_A =  SF_OBJ[shp_A_ix,]
+    shp_B =  SF_OBJ[shp_B_ix,]
+    
+    #split the overlapping portion from the larger
+    shp_red = st_difference(shp_A, shp_B)
+    shp_red_AREA = as.numeric(st_area(shp_red))/1e4
+    
+    
+    if( length(as.numeric(st_area(shp_red)))==0){
+      
+      SF_OBJ_nol$same_size_as[shp_A_ix] = shp_B_ix
+      SF_OBJ_nol$same_size_as[shp_B_ix] = shp_A_ix
+      
+    }else{
+      
+      SF_OBJ_nol$geom[shp_A_ix] <-shp_red$geom
+      SF_OBJ_nol$reduced_area_by[shp_A_ix] = SF_OBJ_nol$reduced_area_by[shp_A_ix]+shp_red_AREA
+      
+    }
+    
+    
+    print(paste("Intersection", oln ,"of ", length(OL_LIST)))
+    
+  }
+  
+  return(SF_OBJ_nol)
+}
+
+
+
+
+
+
+
+A = mapview(SF_OBJ, col.region = "red", alpha = .5)
+B = mapview(SF_OBJ_nol, col.region = "blue", alpha = .5)
+
+B
+
+AB_TAIRA_nol %>% as_tibble() %>% select(reduced_area_by) %>% arrange(desc(reduced_area_by))
+AB_TAIRA_nol %>% as_tibble() %>% select(reduced_area_by) %>% arrange(desc(reduced_area_by))
+
+AB_TAIRA %>% calc_tot_area()
+AB_TAIRA_nol %>% calc_tot_area()
+
+AB_TAIRA_nol_ffn = paste0(datadir_rev, "TA_level_data_sets/Tairawhiti/TA_NCLxAB_LP0012_gt_1ha_nol.gpkg")
+st_write(AB_TAIRA_nol, AB_TAIRA_nol_ffn, append = F)
+
+```
+
+
+
+
+```{r}
+A = mapview(shp1, col.region = "red", alpha = .5)
+B = mapview(shp2, col.region = "blue", alpha = .5)
+C =  mapview(shp_red, col.region = "yellow", alpha = .5)
+D = mapview(AB_TAIRA$geom[olx2], col.region = "green", alpha = .5)
+
+A+B
+A+B+C
+A+B+C+D
+
+A_minus_B = st_difference(shp1,shp2)
+
+mapview(A_minus_B)
+
+A + B + A_minus_B
+
+# AB_AREA_1 = AB_TAIRA$AB_AREA[14]
+# AB_AREA_1 = AB_TAIRA$AB_AREA[15]
+# 
+# shp1 = 
+#   shp2 = AB_TAIRA[15,]
+# 
+# #is there a difference in area
+# overlap_chk = st_overlaps(shp1,shp2)
+# equals_chk = st_equals(shp1,shp2)
+# equals_chk = st_equals(shp1,shp2)
+# 
+# 
+# 
+# }
+# 
+# if (length(which(
+#   print("Overlaps :", 
+#         print(
+#           
+#           
+#           AB_self_ix_nol %>% select(-origins) %>% mapview()
+#           
+#           
+#           
+#           PLP_TAIRA_ffn = paste0(datadir_rev, "TA_level_data_sets/Tairawhiti/TA_NCLxPLP_gt_1ha.gpkg")
+#           file.exists(PLP_TAIRA_ffn)
+#           PLP_TAIRA=st_read(PLP_TAIRA_ffn)
+#           
+#           mapview(PLP_TAIRA)
+#           
+#           
+
+
+```
+
+
+
